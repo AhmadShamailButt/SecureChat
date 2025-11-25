@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { cn } from '../../lib/utils';
 
@@ -7,11 +6,12 @@ const Button = React.forwardRef(
     const baseStyles = "inline-flex items-center justify-center rounded-full font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none";
     
     const variants = {
-      primary: "bg-primary text-white hover:shadow-md hover:bg-primary-600 active:bg-primary-700 dark:bg-primary-600 dark:hover:bg-primary-500",
-      secondary: "bg-secondary text-secondary-foreground hover:shadow-md hover:bg-secondary/90 active:bg-secondary/95 dark:hover:bg-secondary/80",
+      primary: "bg-primary text-primary-foreground hover:shadow-md hover:bg-primary/90 active:bg-primary/95",
+      secondary: "bg-secondary text-secondary-foreground hover:shadow-md hover:bg-secondary/90 active:bg-secondary/95",
       outline: "border border-input bg-transparent hover:bg-accent hover:text-accent-foreground",
       ghost: "hover:bg-accent hover:text-accent-foreground",
-      link: "text-primary underline-offset-4 hover:underline"
+      link: "text-primary underline-offset-4 hover:underline",
+      destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90"
     };
     
     const sizes = {
@@ -45,6 +45,5 @@ const Button = React.forwardRef(
 
 Button.displayName = "Button";
 
-// Change to named export
 export { Button };
 export default Button;

@@ -1,51 +1,42 @@
 import React, { useEffect } from 'react';
-import { Outlet, Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { setUserDetails } from '../../store/slices/userSlice';
-import Navbar from './Navbar';
-import Footer from './Footer';
 
-function Layout() {
+const ProtectedRoute = ({ children }) => {
   const dispatch = useDispatch();
   const location = useLocation();
   const { userDetails } = useSelector((state) => state.user);
 
-  // Restore user from sessionStorage on mount
+  // Check authentication status from sessionStorage/localStorage
   useEffect(() => {
     const token = sessionStorage.getItem("token");
     const userStr = sessionStorage.getItem("user");
     
+    // If token exists but userDetails is not in Redux, restore it from sessionStorage
     if (token && userStr && !userDetails) {
       try {
         const user = JSON.parse(userStr);
         dispatch(setUserDetails(user));
       } catch (error) {
         console.error("Error parsing user from sessionStorage:", error);
+        // Clear invalid data
         sessionStorage.removeItem("token");
         sessionStorage.removeItem("user");
       }
     }
   }, [dispatch, userDetails]);
 
-  // Only protect /chat route, allow home page without login
-  const isChatRoute = location.pathname === '/chat';
+  // Check if user is authenticated
   const isAuthenticated = sessionStorage.getItem("token") || userDetails;
 
-  // Redirect to login only if accessing chat without authentication
-  if (isChatRoute && !isAuthenticated) {
-    return <Navigate to="/login" replace />;
+  if (!isAuthenticated) {
+    // Redirect to login page with return url
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  return (
-    <div className="min-h-screen flex flex-col" style={{ margin: 0, padding: 0, width: '100%' }}>
-      <Navbar />
-      <main className="flex-grow pt-16 w-full" style={{ margin: 0, width: '100%' }}>
-        <Outlet />
-      </main>
-      <Footer />
-    </div>
-  );
-}
+  return children;
+};
 
-export default Layout;
+export default ProtectedRoute;
 

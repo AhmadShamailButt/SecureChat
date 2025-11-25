@@ -1,26 +1,26 @@
-// 3. Update frontend/src/contexts/socket.js
-// Replace your existing socket.js with this improved version
-
 import { io } from 'socket.io-client';
 import { createContext, useContext, useEffect, useState } from 'react';
 
 // Use environment variable with fallback
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 
 // Create socket connection with options
 const socket = io(API_URL, {
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
-  transports: ['websocket', 'polling'],
+  reconnectionDelayMax: 5000,
+  transports: ['polling', 'websocket'], // Try polling first, then websocket
   autoConnect: true,
-  forceNew: true
+  forceNew: true,
+  timeout: 20000
 });
 
 // Create a context for socket state
 const SocketContext = createContext({
   socket: null,
   isConnected: false,
-  connectError: null
+  connectError: null,
+  reconnect: () => {}
 });
 
 // Provider component
@@ -86,3 +86,4 @@ export const useSocket = () => useContext(SocketContext);
 
 // Also export the socket directly for components that just need the instance
 export default socket;
+

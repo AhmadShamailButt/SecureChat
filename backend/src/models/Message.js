@@ -33,3 +33,4 @@ const messageSchema = new mongoose.Schema({
 messageSchema.index({ conversationId: 1, timestamp: 1 });
 
 module.exports = mongoose.models.Message || mongoose.model("Message", messageSchema);
+

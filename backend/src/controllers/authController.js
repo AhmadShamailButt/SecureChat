@@ -1,14 +1,23 @@
 const express = require("express");
 const router = express.Router();
-const axios = require("axios");
 const bcrypt = require("bcryptjs");
-const nodemailer = require("nodemailer");
+const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const User = require("../models/User");
+const { isConnected } = require("../config/database");
 
-let tempUsers = new Map();
+const JWT_SECRET = process.env.JWT_SECRET || "8ae74b4cf76c2e91531a6a5e7ed2ef3a62c4dcaee24d7b176fdfd0ba6c1e9abf";
 
-router.post("/signup", async (req, res) => {
+router.post("/", async (req, res) => {
   const { fullName, department, email, password, gender } = req.body;
+
+  // Check if MongoDB is connected
+  if (!isConnected() && mongoose.connection.readyState !== 1) {
+    console.error("MongoDB not connected. ReadyState:", mongoose.connection.readyState);
+    return res.status(503).json({ 
+      error: "Database connection unavailable. Please ensure MongoDB is running." 
+    });
+  }
 
   if (!email.endsWith("@lhr.nu.edu.pk")) {
     return res.status(400).json({ error: "Only FAST NUCES emails allowed." });
@@ -19,48 +28,51 @@ router.post("/signup", async (req, res) => {
   }
 
   try {
-    const validateRes = await axios.get(
-      `https://emailvalidation.abstractapi.com/v1/?api_key=${process.env.EMAIL_VALIDATION_API_KEY}&email=${email}`
-    );
-
-    if (validateRes.data.deliverability !== "DELIVERABLE") {
-      return res.status(400).json({ error: "Undeliverable email." });
-    }
-
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ error: "Email already in use." });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store in memory (you can switch to Redis or DB for production)
-    tempUsers.set(email, {
-      fullName, department, email, password: hashedPassword, gender,
-      code: verificationCode,
+    const newUser = new User({
+      fullName,
+      department,
+      email,
+      password: hashedPassword,
+      gender,
+      rating: 0,
+      rides_taken: 0,
+      rides_offered: 0,
     });
 
-    const transporter = nodemailer.createTransport({
-      service: "Gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+    await newUser.save();
+
+    const token = jwt.sign(
+      { userId: newUser._id, email: newUser.email },
+      JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    return res.status(201).json({
+      message: "Account created successfully.",
+      token,
+      user: {
+        id: newUser._id,
+        fullName: newUser.fullName,
+        email: newUser.email,
+        department: newUser.department,
+        gender: newUser.gender,
+        rating: newUser.rating,
+        rides_taken: newUser.rides_taken,
+        rides_offered: newUser.rides_offered,
       },
     });
-
-    await transporter.sendMail({
-      from: '"GoFAST Verification" <no-reply@gofast.com>',
-      to: email,
-      subject: "Verify Your GoFAST Account",
-      html: `<p>Your verification code is <b>${verificationCode}</b></p>`,
-    });
-
-    return res.status(200).json({ message: "Verification code sent to email." });
   } catch (err) {
     console.error("Signup error:", err.message);
     return res.status(500).json({ error: "Server error" });
   }
 });
 
-module.exports = { router, tempUsers };
+module.exports = { router };
+

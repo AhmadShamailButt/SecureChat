@@ -1,77 +1,65 @@
-const express  = require("express");
-const cors     = require("cors");
-const morgan   = require("morgan");
+const express = require("express");
+const cors = require("cors");
+const morgan = require("morgan");
 const dotenv = require("dotenv");
-const connectDB = require("./config/db");
-const apiRoutes     = require("./routes/index.js");            // <-- our new index.js
-const carpoolHistoryRoutes = require("./routes/carpoolHistoryRoutes.js");
+const http = require("http");
+const connectDB = require("./src/config/database");
+const { init: initSocket } = require("./src/config/socket");
 
+// Routes
+const authRoutes = require("./src/routes/authRoutes");
+const messageRoutes = require("./src/routes/messageRoutes");
 
-const http     = require("http");
-
-const carpoolRoutes = require("./routes/carpoolRoutes");
-const mapRoutes     = require("./routes/mapRoutes");
-const signinRoutes = require("./controllers/signinController");
-const stopsRoutes = require("./routes/stopRoutes.js");  
-const userRoutes = require("./routes/userRoutes.js"); 
-const signupRouter = require("./controllers/authController").router;
-const verifyTempUserRouter = require("./controllers/verifyTempUser");
-const forgotPasswordRoutes = require("./controllers/forgotPasswordController");
-const verifyCodeRoutes = require("./controllers/verifyResetCodeController");
-const resetPasswordRoutes = require("./controllers/resetPasswordController");
-const profileSetting=require("./controllers/userProfileController.js");
-
-// const upload=require("./Components/UtilsFunctions/upload") ;
 dotenv.config();
 connectDB();
 
-
-const { init: initSocket } = require("./socket");     // create this file as below
-
-const app    = express();
+const app = express();
 const server = http.createServer(app);
-const io     = initSocket(server);
+
+// Allow multiple localhost ports for development
+const allowedOrigins = process.env.CORS_ORIGIN 
+  ? process.env.CORS_ORIGIN.split(',')
+  : ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"];
+
+const io = initSocket(server, {
+  origin: allowedOrigins,
+  methods: ["GET", "POST"],
+  credentials: true
+});
 
 const PORT = process.env.PORT || 5000;
-// Middleware
 
-app.use(cors());
+// Middleware
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all origins for development
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 app.use(morgan("dev"));
-app.use(express.json()); // To parse JSON requests
 
-
-// attach io to requests so controllers can emit
+// Attach io to requests so controllers can emit
 app.use((req, _, next) => {
   req.io = io;
   next();
 });
 
-// Your existing routes
-app.use("/api/carpools", carpoolRoutes);
-app.use("/api/map",      mapRoutes);
-app.use("/api/auth", signinRoutes);
-app.use("/api/carpools/history",carpoolHistoryRoutes);
-app.use("/api/stop",stopsRoutes);
-app.use("/api/user",userRoutes );
-app.use('/api/', carpoolRoutes);
-// New messaging API+ auth
-app.use("/api", apiRoutes);
-app.use("/api/auth", signupRouter);            // Handles POST /api/auth/signup
-app.use("/api/auth", verifyTempUserRouter);    // Handles POST /api/auth/verify
-app.use("/api/auth", forgotPasswordRoutes);
-app.use("/api/auth", verifyCodeRoutes);
-app.use("/api/auth", resetPasswordRoutes);
-app.use("/api/auth/",profileSetting)
-
-// app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Routes
+app.use("/api/auth", authRoutes);
+app.use("/api", messageRoutes);
 
 app.get("/", (req, res) => {
-  res.send("Carpool API is running");
+  res.send("SecureChat API is running");
 });
-
 
 // Start server
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+

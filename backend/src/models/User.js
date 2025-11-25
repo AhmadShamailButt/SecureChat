@@ -21,36 +21,37 @@ const userSchema = new mongoose.Schema({
     minlength: 8
   },
   gender: {
-   type: String,
-   required: true
+    type: String,
+    required: true
   },
   rating: { 
     type: Number,
-     default: 0 
-    },
-  rides_taken:
-   { type: Number, 
     default: 0 
   },
-  rides_offered:
-   { type: Number,
-     default: 0 },
-     resetCode: String,  
-resetPasswordToken: String,
-resetPasswordExpires: Date,
- isOnline: {
-      type: Boolean,
-      default: false,
-    },
-    lastSeen: {
-      type: Date,
-      default: Date.now,
-    },
-profilePicture: {
-  type: String, // base64 image string
-  default: '',
-},
-
+  rides_taken: {
+    type: Number, 
+    default: 0 
+  },
+  rides_offered: {
+    type: Number,
+    default: 0 
+  },
+  resetCode: String,  
+  resetPasswordToken: String,
+  resetPasswordExpires: Date,
+  isOnline: {
+    type: Boolean,
+    default: false,
+  },
+  lastSeen: {
+    type: Date,
+    default: Date.now,
+  },
+  profilePicture: {
+    type: String, // base64 image string
+    default: '',
+  },
 });
 
 module.exports = mongoose.models.User || mongoose.model("User", userSchema);
+

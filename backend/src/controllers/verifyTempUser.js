@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
-const User = require("../models/user");
+const User = require("../models/User");
 const { tempUsers } = require("./authController");
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
@@ -51,3 +51,4 @@ router.post("/verify", async (req, res) => {
 });
 
 module.exports = router;
+

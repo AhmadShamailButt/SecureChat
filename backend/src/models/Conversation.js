@@ -39,3 +39,4 @@ conversationSchema.index(
 
 module.exports = mongoose.models.Conversation ||
   mongoose.model("Conversation", conversationSchema);
+
