@@ -1,4 +1,6 @@
 import axios from 'axios';
+import store from './store';
+import { logout } from './slices/userSlice';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -27,6 +29,9 @@ axiosInstance.interceptors.response.use(
   (error) => {
     // Handle 401 (Unauthorized) and 403 (Forbidden) errors
     if (error.response?.status === 401 || error.response?.status === 403) {
+      // Dispatch logout action to clear Redux state
+      store.dispatch(logout());
+      
       // Clear all authentication data
       sessionStorage.removeItem("token");
       sessionStorage.removeItem("user");
@@ -45,7 +50,6 @@ axiosInstance.interceptors.response.use(
       
       // Redirect to login page
       // Use window.location to ensure a full page reload and state reset
-      // This will also clear Redux state as the app reloads
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }

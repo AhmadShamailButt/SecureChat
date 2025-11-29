@@ -224,34 +224,9 @@ exports.init = (server, corsOptions) => {
         });
 
         console.log(`[BACKEND] Call initiated confirmation sent to caller user room: ${callerId}`);
-
-        // Set timeout to mark call as missed if not answered within 25 seconds
-        setTimeout(async () => {
-          try {
-            const currentCall = await Call.findById(call._id);
-            // Only mark as missed if still in 'missed' status (not answered or declined)
-            if (currentCall && currentCall.status === 'missed') {
-              await Call.findByIdAndUpdate(
-                call._id,
-                {
-                  status: 'missed',
-                  endTime: new Date()
-                },
-                { new: true }
-              );
-              console.log(`[BACKEND] Call ${call._id} automatically marked as missed after 25s timeout`);
-              
-              // Notify caller that call was missed (timeout)
-              io.to(callerId.toString()).emit("voice-call:declined", {
-                callId: call._id.toString(),
-                isTimeout: true,
-                status: 'missed'
-              });
-            }
-          } catch (error) {
-            console.error(`[BACKEND] Error in call timeout handler:`, error);
-          }
-        }, 25000); // 25 seconds
+        
+        // Note: Frontend handles the 25-second timeout for incoming calls
+        // Backend timeout removed to prevent duplicate events
       } catch (error) {
         console.error("[BACKEND] Error initiating voice call:", error);
         socket.emit("voice-call:error", { message: "Failed to initiate call" });

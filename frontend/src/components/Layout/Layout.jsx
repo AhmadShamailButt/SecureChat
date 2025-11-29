@@ -36,10 +36,11 @@ function Layout() {
     return <Navigate to="/login" replace />;
   }
 
-  // Hide Navbar and Footer on chat and calls routes
+  // Hide Navbar and Footer on chat, calls, and settings routes
   const isChatRoute = location.pathname === '/chat' || location.pathname.startsWith('/chat/');
   const isCallsRoute = location.pathname === '/calls';
-  const showNavbarFooter = !isChatRoute && !isCallsRoute;
+  const isSettingsRoute = location.pathname === '/settings';
+  const showNavbarFooter = !isChatRoute && !isCallsRoute && !isSettingsRoute;
 
   return (
     <div className="min-h-screen flex flex-col" style={{ margin: 0, padding: 0, width: '100%' }}>

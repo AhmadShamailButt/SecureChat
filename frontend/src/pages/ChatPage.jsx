@@ -361,15 +361,22 @@ export default function ChatPage() {
 
     const handleCallDeclined = (data) => {
       console.log('[CALL] Call declined:', data);
+      
+      // Only show toast for caller side (receiver already got toast from timeout handler)
+      // Check if we're the caller (have activeCall but not incomingCall for this callId)
+      const isCaller = activeCall?.callId === data.callId && !incomingCall;
+      
+      if (isCaller) {
+        // Show appropriate message based on whether it's a timeout or manual decline
+        if (data.isTimeout || data.status === 'missed') {
+          toast.error('Call missed - No answer');
+        } else {
+          toast.error('Call was declined');
+        }
+      }
+      
       dispatch(endCall());
       endWebRTCCall();
-      
-      // Show appropriate message based on whether it's a timeout or manual decline
-      if (data.isTimeout || data.status === 'missed') {
-        toast.error('Call missed - No answer');
-      } else {
-        toast.error('Call was declined');
-      }
       
       // Refresh call history after call is declined/missed
       dispatch(fetchCallHistory({ limit: 100, offset: 0 }));
@@ -457,9 +464,6 @@ export default function ChatPage() {
     const timeout = setTimeout(() => {
       console.log('[RECEIVER] Call timeout (25s), auto-declining and marking as missed');
       
-      // Show message immediately for receiver
-      toast.error('Call missed - No answer');
-      
       // Emit decline event to backend with timeout flag
       socket?.emit('voice-call:decline', {
         callId: incomingCall.callId,
@@ -471,6 +475,9 @@ export default function ChatPage() {
       dispatch(clearIncomingCall());
       dispatch(endCall());
       endWebRTCCall();
+      
+      // Show message for receiver (timeout)
+      toast.error('Call missed - No answer');
       
       // Refresh call history to show missed call
       dispatch(fetchCallHistory({ limit: 100, offset: 0 }));

@@ -61,14 +61,14 @@ export default function SettingsPage() {
 
   if (!user) {
     return (
-      <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
+      <div className="flex items-center justify-center min-h-screen">
         <p className="text-muted-foreground">Please log in to view settings</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full h-[calc(100vh-64px)] flex overflow-hidden" style={{ margin: 0, padding: 0 }}>
+    <div className="w-full h-screen flex overflow-hidden" style={{ margin: 0, padding: 0 }}>
       {/* Navigation Sidebar - Always visible */}
       <NavigationSidebar
         activeView={activeView}
