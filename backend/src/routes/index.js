@@ -3,11 +3,15 @@ const router  = express.Router();
 
 const contactsController = require('../controllers/contactsController');
 const messageController  = require('../controllers/messageController');
+const userRoutes = require('./userRoutes');
 const authMiddleware = require('../middleware/authMiddleware');
 
 
 // Apply auth middleware to all messaging routes
 router.use('/messages', authMiddleware);
+
+// User routes (includes public key endpoints)
+router.use('/users', userRoutes);
 
 // Contacts routes
 router.get('/messages/contacts', contactsController.getContacts);

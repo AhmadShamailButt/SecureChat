@@ -3,6 +3,7 @@ const Conversation = require('../models/Conversation');
 const Friend = require('../models/Friend');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
+const User = require('../models/User'); // Required for populating user details
 
 /**
  * Get messages for a specific conversation
@@ -30,12 +31,13 @@ exports.getMessages = async (req, res) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const currentUserId = decoded.userId;
 
-    // Validate conversation exists and user is part of it
+    // Validate conversation exists
     const conversation = await Conversation.findById(conversationId);
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
+    // Ensure user is part of the conversation
     const isParticipant = conversation.participants.some(
       p => p.toString() === currentUserId.toString()
     );
@@ -64,13 +66,13 @@ exports.getMessages = async (req, res) => {
       }
     }
 
-    // Get messages with sender information - Important: Use the ObjectID, not the string version
+    // Get messages with sender information (Merged Logic)
     let messages = await Message.find({ 
       conversationId: conversation._id.toString() 
     })
-      .populate('senderId', 'fullName email')
+      .populate('senderId', 'fullName email') // From File 2
       .sort({ timestamp: 1 })
-      .limit(100); // Limit to last 100 messages
+      .limit(100);
     
     // Mark messages as read (messages received by current user)
     const updateResult = await Message.updateMany(
@@ -82,8 +84,7 @@ exports.getMessages = async (req, res) => {
       { $set: { read: true } }
     );
 
-    // Re-fetch messages after marking as read to get updated read status
-    // This ensures sent messages show correct read status
+    // Re-fetch messages if needed to get updated read status (From File 2 logic)
     if (updateResult.modifiedCount > 0) {
       messages = await Message.find({ 
         conversationId: conversation._id.toString() 
@@ -93,16 +94,14 @@ exports.getMessages = async (req, res) => {
         .limit(100);
     }
 
-    // Get current user info for "me" messages
-    const User = require('../models/User');
+    // Get current user info for "me" messages (From File 2)
     const currentUser = await User.findById(currentUserId);
 
-    // If we marked any messages as read, notify the sender via socket
-    // (otherParticipant was already declared above)
+    // Send Read Receipt via Socket (From File 2)
     if (updateResult.modifiedCount > 0 && req.io && otherParticipant) {
-      // Get the message IDs that were marked as read
       const readMessageIds = messages
         .filter(msg => 
+          msg.receiverId && 
           msg.receiverId.toString() === currentUserId.toString() && 
           msg.senderId._id.toString() === otherParticipant.toString() &&
           msg.read === true
@@ -117,41 +116,48 @@ exports.getMessages = async (req, res) => {
           readAt: new Date().toISOString()
         };
         
-        console.log('Sending read receipt to user:', otherParticipant.toString(), readReceipt);
-        
-        // Emit to the sender of the messages - try multiple ways to ensure delivery
-        // User-specific room (most reliable - user should join this on connection)
+        // Emit to the sender of the messages
         req.io.to(otherParticipant.toString()).emit('messagesRead', readReceipt);
-        // Conversation room
         req.io.to(conversation._id.toString()).emit('messagesRead', readReceipt);
-        // Sample-prefixed room (for backward compatibility)
-        req.io.to(`sample-${conversation._id.toString()}`).emit('messagesRead', readReceipt);
       }
     }
 
-    // Format messages for the front end
-    // Messages now have updated read status after re-fetch
+    // Format messages - CRITICAL MERGE
+    // Combines File 2's senderName/timestamps with File 1's encryption/receiverId fields
     const formattedMessages = messages.map(msg => {
       const isMine = msg.senderId._id.toString() === currentUserId.toString();
       const sender = msg.senderId;
       
-      // For messages sent by current user: read status indicates if receiver has read it
-      // For messages received by current user: they're now read (we just marked them)
       let readStatus = msg.read;
       if (!isMine) {
-        // For received messages, they're now read (we just marked them as read)
+        // For received messages, they are now read
         readStatus = true;
       }
-      // For sent messages, keep the original read status (indicates if receiver read it)
-      
+
       return {
         id: msg._id.toString(),
         conversationId: msg.conversationId,
+        
+        // Sender Info (File 2)
         senderId: isMine ? 'me' : msg.senderId._id.toString(),
         senderName: isMine ? (currentUser?.fullName || 'You') : (sender?.fullName || 'Unknown'),
+        
+        // Receiver ID (CRITICAL from File 1)
+        receiverId: msg.receiverId ? msg.receiverId.toString() : null,
+        
+        // Content
         text: msg.text,
+        
+        // Encryption Fields (CRITICAL from File 1)
+        encryptedData: msg.encryptedData || '',
+        iv: msg.iv || '',
+        authTag: msg.authTag || '',
+        isEncrypted: msg.isEncrypted || false,
+        
+        // Timestamps (File 2)
         timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         fullTimestamp: msg.timestamp.toISOString ? msg.timestamp.toISOString() : new Date(msg.timestamp).toISOString(),
+        
         read: readStatus
       };
     });
@@ -168,12 +174,12 @@ exports.getMessages = async (req, res) => {
  */
 exports.postMessage = async (req, res) => {
   try {
-    let { conversationId, text } = req.body;
+    // Extract ALL fields including encryption fields (CRITICAL from File 1)
+    let { conversationId, text, encryptedData, iv, authTag, isEncrypted } = req.body;
 
     // Handle conversation IDs with "sample-" prefix
     if (conversationId.startsWith('sample-')) {
       conversationId = conversationId.replace('sample-', '');
-      
       if (!mongoose.Types.ObjectId.isValid(conversationId)) {
         return res.status(400).json({ error: 'Invalid conversation ID format' });
       }
@@ -208,7 +214,7 @@ exports.postMessage = async (req, res) => {
       p => p.toString() !== currentUserId.toString()
     );
 
-    // Check if users are friends (status: "accepted") before allowing messages
+    // Check if users are friends
     if (receiverId) {
       const friendship = await Friend.findOne({
         $or: [
@@ -224,55 +230,69 @@ exports.postMessage = async (req, res) => {
       }
     }
 
-    // Create new message with the proper ObjectID conversion
-    const newMessage = new Message({
-      conversationId: conversation._id.toString(), // Make sure this is a string
+    // Create new message WITH encryption fields (CRITICAL from File 1)
+    const messageData = {
+      conversationId: conversation._id.toString(),
       senderId: currentUserId,
       receiverId,
       text,
       timestamp: new Date()
-    });
+    };
 
+    // Add encryption fields if message is encrypted
+    if (isEncrypted) {
+      messageData.encryptedData = encryptedData || '';
+      messageData.iv = iv || '';
+      messageData.authTag = authTag || '';
+      messageData.isEncrypted = true;
+    } else {
+      messageData.isEncrypted = false;
+    }
+
+    const newMessage = new Message(messageData);
     await newMessage.save();
 
-    // Populate sender info
+    // Populate sender info for the response (File 2)
     await newMessage.populate('senderId', 'fullName email');
+    const senderName = newMessage.senderId.fullName || 'Unknown';
 
     // Update conversation's last message
     conversation.lastMessage = text;
     conversation.lastMessageTimestamp = new Date();
     await conversation.save();
 
-    // Get sender name
-    const User = require('../models/User');
-    const sender = await User.findById(currentUserId);
-    const senderName = sender?.fullName || 'Unknown';
-
-    // Format message for socket.io and response
+    // Format message for response (CRITICAL MERGE)
     const formattedMessage = {
       id: newMessage._id.toString(),
       conversationId: conversation._id.toString(),
-      senderId: 'me', // For the sender's UI
-      senderName: senderName,
-      text,
+      senderId: 'me',
+      senderName: senderName, // File 2
+      receiverId: newMessage.receiverId.toString(), // CRITICAL from File 1
+      text: newMessage.text,
+      
+      // Encryption Fields (CRITICAL from File 1)
+      encryptedData: newMessage.encryptedData || '',
+      iv: newMessage.iv || '',
+      authTag: newMessage.authTag || '',
+      isEncrypted: newMessage.isEncrypted || false,
+      
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       fullTimestamp: newMessage.timestamp.toISOString ? newMessage.timestamp.toISOString() : new Date(newMessage.timestamp).toISOString(),
+      
       read: false
     };
 
     // Emit message via socket.io
     if (req.io) {
-      // For other users, senderId should be the actual ID
       const socketMessage = {
         ...formattedMessage,
-        senderId: currentUserId.toString(),
+        senderId: currentUserId.toString(), // Real ID for others
         senderName: senderName,
+        // Ensure full timestamp is available
         fullTimestamp: newMessage.timestamp.toISOString ? newMessage.timestamp.toISOString() : new Date(newMessage.timestamp).toISOString()
       };
       
-      // Emit to both the original ID format and the clean format to ensure delivery
-      const roomId = `sample-${conversation._id.toString()}`; // If this is how your socket rooms are named
-      req.io.to(roomId).emit('newMessage', socketMessage);
+      // Emit to conversation room
       req.io.to(conversation._id.toString()).emit('newMessage', socketMessage);
     }
 
@@ -284,13 +304,12 @@ exports.postMessage = async (req, res) => {
 };
 
 /**
- * Mark messages as read
+ * Mark messages as read (From File 2)
  */
 exports.markAsRead = async (req, res) => {
   try {
     const { conversationId, messageIds } = req.body;
     
-    // Get current user ID from token
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -299,7 +318,6 @@ exports.markAsRead = async (req, res) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const currentUserId = decoded.userId;
 
-    // Validate conversation exists and user is part of it
     const conversation = await Conversation.findById(conversationId);
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation not found' });
@@ -313,17 +331,14 @@ exports.markAsRead = async (req, res) => {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
-    // Mark messages as read
     const updateQuery = {
       conversationId: conversation._id.toString(),
       receiverId: currentUserId,
       read: false
     };
 
-    // If specific message IDs provided, only mark those
     if (messageIds && Array.isArray(messageIds) && messageIds.length > 0) {
       updateQuery._id = { $in: messageIds.map(id => {
-        // Handle both string and ObjectId
         if (mongoose.Types.ObjectId.isValid(id)) {
           return new mongoose.Types.ObjectId(id);
         }
@@ -336,14 +351,11 @@ exports.markAsRead = async (req, res) => {
       { $set: { read: true } }
     );
 
-    // Get the other participant to notify them
     const otherParticipant = conversation.participants.find(
       p => p.toString() !== currentUserId.toString()
     );
 
-    // Emit read receipt via socket.io
     if (req.io && otherParticipant && result.modifiedCount > 0) {
-      // Get the actual message IDs that were marked as read
       const actualReadMessageIds = messageIds && messageIds.length > 0 
         ? messageIds 
         : (await Message.find({
@@ -358,15 +370,8 @@ exports.markAsRead = async (req, res) => {
         readAt: new Date().toISOString()
       };
       
-      console.log('Sending read receipt to user:', otherParticipant.toString(), readReceipt);
-      
-      // Emit to the sender of the messages - try multiple ways to ensure delivery
-      // User-specific room (most reliable - user should join this on connection)
       req.io.to(otherParticipant.toString()).emit('messagesRead', readReceipt);
-      // Conversation room
       req.io.to(conversation._id.toString()).emit('messagesRead', readReceipt);
-      // Sample-prefixed room (for backward compatibility)
-      req.io.to(`sample-${conversation._id.toString()}`).emit('messagesRead', readReceipt);
     }
 
     res.json({ 
@@ -380,13 +385,12 @@ exports.markAsRead = async (req, res) => {
 };
 
 /**
- * Create or get a conversation between two users
+ * Get or create conversation (Shared logic)
  */
 exports.getOrCreateConversation = async (req, res) => {
   try {
-    const { userId } = req.params; // Target user to chat with
+    const { userId } = req.params;
     
-    // Get current user ID from token
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -395,40 +399,37 @@ exports.getOrCreateConversation = async (req, res) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const currentUserId = decoded.userId;
 
-    // Check if users exist
     if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(currentUserId)) {
       return res.status(400).json({ error: 'Invalid user ID' });
     }
 
-    // Find existing conversation
     let conversation = await Conversation.findOne({
       participants: { $all: [currentUserId, userId] }
     });
 
-    // If no conversation exists, create one
     if (!conversation) {
       conversation = new Conversation({
         participants: [currentUserId, userId],
-        lastMessage: "",
+        lastMessage: '',
         lastMessageTimestamp: new Date()
       });
-      
       await conversation.save();
     }
 
-    // Return both the regular ID and the socket room format ID
-    res.json({ 
-      conversationId: conversation._id.toString(),
-      socketRoomId: `sample-${conversation._id.toString()}`
+    res.json({
+      id: conversation._id.toString(),
+      participants: conversation.participants,
+      lastMessage: conversation.lastMessage,
+      lastMessageTimestamp: conversation.lastMessageTimestamp
     });
   } catch (error) {
-    console.error('Error creating/getting conversation:', error);
-    res.status(500).json({ error: 'Failed to create/get conversation' });
+    console.error('Error creating/fetching conversation:', error);
+    res.status(500).json({ error: 'Failed to create conversation' });
   }
 };
 
 /**
- * Forward a message to one or more friends
+ * Forward a message (From File 2)
  */
 exports.forwardMessage = async (req, res) => {
   try {
@@ -438,7 +439,6 @@ exports.forwardMessage = async (req, res) => {
       return res.status(400).json({ error: 'Message ID and friend IDs array are required' });
     }
 
-    // Get current user ID from token
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -447,13 +447,11 @@ exports.forwardMessage = async (req, res) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const currentUserId = decoded.userId;
 
-    // Find the original message
     const originalMessage = await Message.findById(messageId);
     if (!originalMessage) {
       return res.status(404).json({ error: 'Message not found' });
     }
 
-    // Verify user has access to the original message (must be sender or receiver)
     const hasAccess = originalMessage.senderId.toString() === currentUserId.toString() ||
                       originalMessage.receiverId.toString() === currentUserId.toString();
     
@@ -461,27 +459,20 @@ exports.forwardMessage = async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to forward this message' });
     }
 
-    // Get the original sender's name for the forwarded message
-    const User = require('../models/User');
     const originalSender = await User.findById(originalMessage.senderId);
     const originalSenderName = originalSender ? originalSender.fullName : 'Unknown';
-
-    // Format the forwarded message text
     const forwardedText = `Forwarded from ${originalSenderName}: ${originalMessage.text}`;
 
     const forwardedMessages = [];
     const errors = [];
 
-    // Forward to each friend
     for (const friendId of friendIds) {
       try {
-        // Validate friend ID
         if (!mongoose.Types.ObjectId.isValid(friendId)) {
           errors.push({ friendId, error: 'Invalid friend ID' });
           continue;
         }
 
-        // Check if users are friends
         const friendship = await Friend.findOne({
           $or: [
             { userId: currentUserId, friendId: friendId, status: "accepted" },
@@ -494,7 +485,6 @@ exports.forwardMessage = async (req, res) => {
           continue;
         }
 
-        // Find or create conversation with the friend
         let conversation = await Conversation.findOne({
           participants: { $all: [currentUserId, friendId] }
         });
@@ -508,24 +498,24 @@ exports.forwardMessage = async (req, res) => {
           await conversation.save();
         }
 
-        // Create forwarded message
         const forwardedMessage = new Message({
           conversationId: conversation._id.toString(),
           senderId: currentUserId,
           receiverId: friendId,
           text: forwardedText,
           timestamp: new Date(),
-          forwardedFrom: originalMessage.senderId
+          forwardedFrom: originalMessage.senderId,
+          // Forwarded messages are typically not encrypted unless re-encrypted, 
+          // keeping as plain text for simplicity as per source file logic.
+          isEncrypted: false 
         });
 
         await forwardedMessage.save();
 
-        // Update conversation's last message
         conversation.lastMessage = forwardedText;
         conversation.lastMessageTimestamp = new Date();
         await conversation.save();
 
-        // Format message for socket.io
         const formattedMessage = {
           id: forwardedMessage._id.toString(),
           conversationId: conversation._id.toString(),
@@ -536,10 +526,7 @@ exports.forwardMessage = async (req, res) => {
           forwardedFrom: originalMessage.senderId.toString()
         };
 
-        // Emit message via socket.io
         if (req.io) {
-          const roomId = `sample-${conversation._id.toString()}`;
-          req.io.to(roomId).emit('newMessage', formattedMessage);
           req.io.to(conversation._id.toString()).emit('newMessage', formattedMessage);
         }
 
@@ -554,7 +541,6 @@ exports.forwardMessage = async (req, res) => {
       }
     }
 
-    // Return results
     res.status(201).json({
       success: true,
       forwardedCount: forwardedMessages.length,
@@ -566,4 +552,3 @@ exports.forwardMessage = async (req, res) => {
     res.status(500).json({ error: 'Failed to forward message' });
   }
 };
-

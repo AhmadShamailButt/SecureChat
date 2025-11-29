@@ -1,11 +1,12 @@
 import React, { useState, useRef } from 'react';
-import { ArrowRight, Check, CheckCheck } from 'lucide-react';
+import PropTypes from 'prop-types';
+import { ArrowRight, Check, CheckCheck, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'react-hot-toast';
 import ForwardMessageDialog from './ForwardMessageDialog';
 import MessageDropdown from './MessageDropdown';
 
-export default function MessageList({ messages, loading, currentUserId, onReply, activeContact, currentUserName, isGroupChat = false }) {
+export default function MessageList({ messages = [], loading = false, currentUserId, onReply, activeContact, currentUserName, isGroupChat = false }) {
   const [forwardDialogOpen, setForwardDialogOpen] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(null); // Store message ID for which dropdown is open
@@ -21,14 +22,19 @@ export default function MessageList({ messages, loading, currentUserId, onReply,
     }
   };
 
-  // Show loading state when loading, even if there are old messages
-  if (loading) {
-    return <div className="flex justify-center p-4 text-muted-foreground">Loading messages...</div>;
+  // Show loading state when loading and no messages exist (HEAD logic for UI, main logic for flow)
+  if (loading && (!messages || messages.length === 0)) {
+    return (
+      <div className="flex justify-center items-center h-full p-4 text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin mr-2" />
+        Loading messages...
+      </div>
+    );
   }
 
-  if (messages.length === 0) {
+  if (!messages || messages.length === 0) {
     return (
-      <div className="flex justify-center p-4 text-muted-foreground">
+      <div className="flex justify-center items-center h-full p-4 text-muted-foreground opacity-70">
         No messages yet. Start the conversation!
       </div>
     );
@@ -100,7 +106,7 @@ export default function MessageList({ messages, loading, currentUserId, onReply,
       // Add message bubble
       elements.push(
         <MessageBubble 
-          key={msg.id} 
+          key={msg.id || index} 
           message={msg} 
           messages={messages}
           currentUserId={currentUserId}
@@ -135,22 +141,6 @@ export default function MessageList({ messages, loading, currentUserId, onReply,
 function MessageBubble({ message, messages, currentUserId, activeContact, currentUserName, isGroupChat, onForward, onReply, dropdownOpen, onDropdownToggle }) {
   const isMine = message.senderId === currentUserId || message.senderId === 'me';
   const messageRef = useRef(null);
-  
-  // // Debug: Log message read status for sent messages
-  // if (isMine && !message.pending && !message.failed) {
-  //   console.log('Message read status:', {
-  //     id: message.id,
-  //     read: message.read,
-  //     readType: typeof message.read,
-  //     pending: message.pending,
-  //     failed: message.failed,
-  //     isMine: isMine,
-  //     senderId: message.senderId,
-  //     currentUserId: currentUserId,
-  //     shouldShowTick: isMine && !message.pending && !message.failed,
-  //     shouldShowDoubleTick: message.read === true
-  //   });
-  // }
   
   // Get sender name
   const senderName = message.senderName || (isMine ? (currentUserName || 'You') : (activeContact?.name || activeContact?.fullName || 'Unknown'));
@@ -256,11 +246,11 @@ function MessageBubble({ message, messages, currentUserId, activeContact, curren
         ref={messageRef}
         data-message-bubble
         className={cn(
-          "relative max-w-xs sm:max-w-md rounded-2xl px-4 py-2 cursor-pointer",
+          "relative max-w-xs sm:max-w-md rounded-2xl px-4 py-2 cursor-pointer break-words shadow-sm",
           "hover:opacity-90 transition-opacity select-none",
           isMine 
             ? "bg-primary text-primary-foreground rounded-tr-none"
-            : "bg-muted text-muted-foreground rounded-tl-none"
+            : "bg-muted text-foreground rounded-tl-none"
         )}
         onClick={handleMessageClick}
         onContextMenu={handleContextMenu}
@@ -328,8 +318,8 @@ function MessageBubble({ message, messages, currentUserId, activeContact, curren
               // Check if the message being replied to was sent by the current user
               const repliedToSenderId = replyInfo.senderId;
               const isReplyingToCurrentUser = repliedToSenderId === currentUserId || 
-                                               repliedToSenderId === 'me' ||
-                                               repliedToSenderId?.toString() === currentUserId?.toString();
+                                              repliedToSenderId === 'me' ||
+                                              repliedToSenderId?.toString() === currentUserId?.toString();
               
               // Show "You" if replying to current user's message, otherwise show the sender's name
               const displayName = isReplyingToCurrentUser 
@@ -354,7 +344,7 @@ function MessageBubble({ message, messages, currentUserId, activeContact, curren
         {/* Actual message text */}
         <div className="flex items-end justify-between gap-2">
           <p className={cn(
-            "flex-1",
+            "flex-1 text-sm leading-relaxed",
             isMine ? "text-primary-foreground" : "text-foreground"
           )}>
             {(() => {
@@ -393,16 +383,8 @@ function MessageBubble({ message, messages, currentUserId, activeContact, curren
                 {(() => {
                   // Check read status - handle both boolean true and string 'true'
                   const isRead = message.read === true || message.read === 'true' || message.read === 1;
-                  // if (isMine) {
-                  //   console.log('Rendering tick for message:', {
-                  //     id: message.id,
-                  //     read: message.read,
-                  //     readType: typeof message.read,
-                  //     isRead: isRead,
-                  //     willShowDoubleTick: isRead
-                  //   });
-                  // }
-                 return isRead ? (
+                 
+                  return isRead ? (
                     <CheckCheck className="h-3.5 w-3.5" style={{ color: '#3b82f6', display: 'inline-block', flexShrink: 0 }} />
                   ) : (
                     <Check className="h-3.5 w-3.5" style={{ display: 'inline-block', flexShrink: 0 }} />
@@ -434,3 +416,39 @@ function MessageBubble({ message, messages, currentUserId, activeContact, curren
     </div>
   );
 }
+
+// Strict Prop Validation
+MessageList.propTypes = {
+  messages: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string,
+      text: PropTypes.string,
+      senderId: PropTypes.string,
+      timestamp: PropTypes.string,
+      fullTimestamp: PropTypes.string,
+      pending: PropTypes.bool,
+      failed: PropTypes.bool,
+      read: PropTypes.oneOfType([PropTypes.bool, PropTypes.string, PropTypes.number]),
+      replyingTo: PropTypes.object,
+    })
+  ),
+  loading: PropTypes.bool,
+  currentUserId: PropTypes.string,
+  onReply: PropTypes.func,
+  activeContact: PropTypes.object,
+  currentUserName: PropTypes.string,
+  isGroupChat: PropTypes.bool,
+};
+
+MessageBubble.propTypes = {
+  message: PropTypes.object.isRequired,
+  messages: PropTypes.array,
+  currentUserId: PropTypes.string,
+  activeContact: PropTypes.object,
+  currentUserName: PropTypes.string,
+  isGroupChat: PropTypes.bool,
+  onForward: PropTypes.func,
+  onReply: PropTypes.func,
+  dropdownOpen: PropTypes.bool,
+  onDropdownToggle: PropTypes.func,
+};

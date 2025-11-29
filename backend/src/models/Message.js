@@ -19,6 +19,22 @@ const messageSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  encryptedData: {
+    type: String, // Encrypted message ciphertext (base64)
+    default: ''
+  },
+  iv: {
+    type: String, // Initialization vector for AES-GCM (base64)
+    default: ''
+  },
+  authTag: {
+    type: String, // Authentication tag for AES-GCM (base64)
+    default: ''
+  },
+  isEncrypted: {
+    type: Boolean,
+    default: false
+  },
   timestamp: {
     type: Date,
     default: Date.now

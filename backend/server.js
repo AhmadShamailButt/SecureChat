@@ -11,6 +11,8 @@ const authRoutes = require("./src/routes/authRoutes");
 const messageRoutes = require("./src/routes/messageRoutes");
 const friendRoutes = require("./src/routes/friendRoutes");
 const groupRoutes = require("./src/routes/groupRoutes");
+// Added line 14:
+const userRoutes = require("./src/routes/userRoutes");
 const callRoutes = require("./src/routes/callRoutes");
 
 dotenv.config();
@@ -57,6 +59,7 @@ app.use((req, _, next) => {
 app.use("/api/auth", authRoutes);
 app.use("/api", messageRoutes);
 app.use("/api/friends", friendRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api/groups", groupRoutes);
 app.use("/api/calls", callRoutes);
 

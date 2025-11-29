@@ -51,6 +51,10 @@ const userSchema = new mongoose.Schema({
     type: String, // base64 image string
     default: '',
   },
+  publicKey: {
+    type: String, // ECDH public key in base64 format for E2EE
+    default: '',
+  },
 });
 
 module.exports = mongoose.models.User || mongoose.model("User", userSchema);

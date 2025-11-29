@@ -440,20 +440,33 @@ const chatSlice = createSlice({
         if (newMessage.read === undefined) {
           newMessage.read = false;
         }
-        // Remove pending message with temp ID and add the real message
-        const tempId = `temp-${Date.now()}`;
-        const pendingIndex = state.messages.findIndex(msg => 
-          msg.pending && 
-          msg.conversationId === newMessage.conversationId &&
-          msg.text === newMessage.text
-        );
-        if (pendingIndex !== -1) {
-          // Replace pending message with real message
-          state.messages[pendingIndex] = newMessage;
-        } else {
-          // If no pending message found, just add the new message
-          state.messages.push(newMessage);
+        
+        // Find all pending messages from this conversation sent in last 10 seconds
+        // This handles encrypted messages where text comparison fails
+        const now = Date.now();
+        const pendingIndices = [];
+        
+        state.messages.forEach((msg, index) => {
+          if (msg.pending && msg.conversationId === newMessage.conversationId) {
+            // Extract timestamp from temp ID (temp-1234567890)
+            const msgTime = msg.id?.startsWith?.('temp-') 
+              ? parseInt(msg.id.replace('temp-', '')) 
+              : 0;
+            
+            // If message was created recently (within 10 seconds), it's our pending message
+            if (now - msgTime < 10000) {
+              pendingIndices.push(index);
+            }
+          }
+        });
+        
+        // Remove all matching pending messages (in reverse to maintain indices)
+        for (let i = pendingIndices.length - 1; i >= 0; i--) {
+          state.messages.splice(pendingIndices[i], 1);
         }
+        
+        // Add the real message from backend
+        state.messages.push(newMessage);
       })
       .addCase(sendMessage.rejected, (state, action) => {
         state.error = action.payload;
