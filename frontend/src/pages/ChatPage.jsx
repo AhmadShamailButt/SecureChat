@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useSocket } from '../contexts/SocketContext';
+import { useCrypto } from '../contexts/CryptoContext';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import ContactsSidebar from "../components/Chat/ContactsSidebar";
 import ChatArea from "../components/Chat/ChatArea";
 import EmptyChatState from "../components/Chat/EmptyChatState";
 import { fetchContacts, fetchMessages, sendMessage, setSelectedContact, setSelectedGroup, addMessage, getFriendRequests, fetchGroups, getGroupRequests } from '../store/slices/chatSlice';
 import { Button } from '../components/ui/Button';
+import axiosInstance from '../store/axiosInstance';
 
 export default function ChatPage() {
   const location = useLocation();
@@ -14,19 +16,20 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { socket, isConnected, connectError, reconnect } = useSocket();
+  const { encryptMessage, decryptMessage, isInitialized: isCryptoInitialized } = useCrypto();
   const { contacts, messages, selectedContact, selectedGroup, groups, isContactsLoading, isMessagesLoading, friendRequests } = useSelector((state) => state.chat);
   const { userDetails: user } = useSelector((state) => state.user);
   const [activeId, setActiveId] = useState(null);
   const [processedMessageIds, setProcessedMessageIds] = useState(new Set());
+  const [decryptedMessages, setDecryptedMessages] = useState({});
 
-  // Calculate active contact and group early so they can be used in effects
+  // Calculate active contact and group early
   const activeContact = selectedContact || contacts.find(c => c.id === activeId);
   const activeGroup = selectedGroup || groups.find(g => g.id === activeId);
 
   // Check URL params for group or contact ID
   useEffect(() => {
     if (params.id) {
-      // Check if it's a group route
       if (location.pathname.includes('/group/')) {
         const group = groups.find(g => g.id === params.id);
         if (group) {
@@ -35,7 +38,6 @@ export default function ChatPage() {
           dispatch(setSelectedContact(null));
         }
       } else {
-        // It's a contact route
         const contact = contacts.find(c => c.id === params.id);
         if (contact) {
           setActiveId(params.id);
@@ -44,110 +46,236 @@ export default function ChatPage() {
         }
       }
     } else if (location.state?.activeConversation) {
-      // Fallback to location state
-      setActiveId(location.state.activeConversation);
-    } else if (location.state?.userIdToOpenChat && contacts.length > 0) {
-      const contactToOpen = contacts.find(contact => contact.id === location.state.userIdToOpenChat);
-      if (contactToOpen) {
-        setActiveId(contactToOpen.id);
-        dispatch(setSelectedContact(contactToOpen));
-        navigate(`/chat/${contactToOpen.id}`, { replace: true });
+      const conversationId = location.state.activeConversation;
+      const contact = contacts.find(c => c.id === conversationId);
+      if (contact) {
+        setActiveId(conversationId);
+        dispatch(setSelectedContact(contact));
+        dispatch(setSelectedGroup(null));
       }
     }
-    // Don't auto-select a contact by default - let user choose
   }, [params.id, location.pathname, location.state, contacts, groups, activeId, dispatch, navigate]);
 
-  // Load contacts, friend requests, groups, and group requests using Redux on first mount
+  // Load contacts, friend requests, groups
   useEffect(() => {
     if (!user) return;
-    
-    // Always fetch on first load of chat page
     dispatch(fetchContacts());
     dispatch(getFriendRequests());
     dispatch(fetchGroups());
     dispatch(getGroupRequests());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]); // Only depend on user to avoid infinite loops
+  }, [user, dispatch]);
 
-  // Join room effect (only for contacts, not groups)
+  // Decrypt messages when they're loaded
   useEffect(() => {
-    if (!activeId || !isConnected || !socket || activeGroup) return; // Skip if it's a group
+    const decryptMessagesAsync = async () => {
+      if (!messages || messages.length === 0 || !isCryptoInitialized || !user || !activeContact) {
+        return;
+      }
+
+      const newDecrypted = {};
+      
+      for (const msg of messages) {
+        // Skip if already decrypted or not encrypted
+        if (decryptedMessages[msg.id] || !msg.isEncrypted) {
+          newDecrypted[msg.id] = decryptedMessages[msg.id] || msg.text;
+          continue;
+        }
+
+        try {
+          // Determine other user's ID for decryption
+          let otherUserId;
+          
+          if (msg.senderId === 'me') {
+            // I sent this message
+            // Use receiverId if available, otherwise use activeContact.userId as fallback
+            otherUserId = msg.receiverId || activeContact.userId;
+          } else {
+            // They sent this message
+            otherUserId = msg.senderId;
+          }
+
+          // Skip if we can't determine the other user
+          if (!otherUserId) {
+            console.warn(`Cannot decrypt message ${msg.id}: missing user ID`);
+            newDecrypted[msg.id] = '[Cannot decrypt: Old message format]';
+            continue;
+          }
+
+          console.log(`🔓 Decrypting message ${msg.id}:`, {
+            iSentIt: msg.senderId === 'me',
+            senderId: msg.senderId,
+            receiverId: msg.receiverId,
+            decryptWithUserId: otherUserId
+          });
+
+          const decrypted = await decryptMessage(
+            {
+              ciphertext: msg.encryptedData,
+              iv: msg.iv,
+              authTag: msg.authTag
+            },
+            otherUserId
+          );
+
+          newDecrypted[msg.id] = decrypted;
+          console.log(`✅ Decrypted message ${msg.id}`);
+        } catch (error) {
+          console.error(`❌ Failed to decrypt message ${msg.id}:`, error);
+          newDecrypted[msg.id] = '[Decryption failed]';
+        }
+      }
+
+      setDecryptedMessages(prev => ({ ...prev, ...newDecrypted }));
+    };
+
+    decryptMessagesAsync();
+  }, [messages, isCryptoInitialized, user, activeContact, decryptMessage]);
+
+  // Join room effect
+  useEffect(() => {
+    if (!activeId || !isConnected || !socket || activeGroup) return;
     console.log('Joining room for conversation:', activeId);
+    
     socket.emit('join', {
       conversationId: activeId,
       userId: user?.id
     });
 
-    const handleJoined = (data) => {
-      console.log('Joined room:', data);
-    };
+    return () => {};
+  }, [activeId, isConnected, socket, activeGroup, user]);
 
-    socket.on('joined', handleJoined);
-
-    return () => {
-      socket.off('joined', handleJoined);
-    };
-  }, [activeId, isConnected, socket, user, activeGroup]);
-
-  // Load messages when active contact changes using Redux (only for contacts, not groups)
+  // Fetch messages when active contact or group changes
   useEffect(() => {
-    if (!activeId || activeGroup) return; // Skip if it's a group
-    setProcessedMessageIds(new Set());
-    dispatch(fetchMessages(activeId));
-  }, [activeId, dispatch, activeGroup]);
+    if (activeId && !activeGroup) {
+      dispatch(fetchMessages(activeId));
+    }
+  }, [activeId, activeGroup, dispatch]);
 
-  // Listen for new messages (only for contacts, not groups)
+  // Listen for new messages via socket
   useEffect(() => {
-    if (!isConnected || !activeId || !socket || activeGroup) return; // Skip if it's a group
-    const handleNewMessage = (msg) => {
-      console.log('New message received:', msg);
+    if (!socket || !isConnected) return;
+    
+    const handleNewMessage = async (msg) => {
+      console.log('📨 New message received:', msg);
       if (msg.conversationId !== activeId) {
         return;
       }
       if (msg.id && processedMessageIds.has(msg.id)) {
-        console.log('Skipping duplicate message:', msg.id);
+        console.log('⏭️  Skipping duplicate message:', msg.id);
         return;
       }
       if (msg.id) {
         setProcessedMessageIds(prev => new Set(prev).add(msg.id));
       }
       if (msg.senderId !== user?.id) {
+        // Add message to state
         dispatch(addMessage(msg));
+        
+        // Decrypt if encrypted
+        if (msg.isEncrypted && isCryptoInitialized) {
+          try {
+            // For incoming messages, decrypt with sender's ID
+            console.log(`🔓 Decrypting incoming message from:`, msg.senderId);
+            
+            const decrypted = await decryptMessage(
+              {
+                ciphertext: msg.encryptedData,
+                iv: msg.iv,
+                authTag: msg.authTag
+              },
+              msg.senderId
+            );
+            
+            setDecryptedMessages(prev => ({ ...prev, [msg.id]: decrypted }));
+            console.log(`✅ Decrypted incoming message`);
+          } catch (error) {
+            console.error('❌ Failed to decrypt incoming message:', error);
+            setDecryptedMessages(prev => ({ ...prev, [msg.id]: '[Decryption failed]' }));
+          }
+        }
       }
     };
+    
     socket.on('newMessage', handleNewMessage);
     return () => {
       socket.off('newMessage', handleNewMessage);
     };
-  }, [isConnected, activeId, socket, processedMessageIds, user, dispatch, activeGroup]);
+  }, [isConnected, activeId, socket, processedMessageIds, user, dispatch, activeGroup, isCryptoInitialized, decryptMessage]);
 
   const handleSend = async (e, messageText) => {
     e.preventDefault();
-    if (!messageText.trim() || !activeId || !isConnected || activeGroup) return; // Don't send messages for groups
-    console.log('Sending message to conversation:', activeId);
-    const tempId = `temp-${Date.now()}`;
-    const newMessage = {
-      id: tempId,
-      conversationId: activeId,
-      senderId: user?.id || 'me',
-      text: messageText.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      pending: true
-    };
-    dispatch(addMessage(newMessage));
+    if (!messageText.trim() || !activeId || !isConnected || activeGroup) return;
+    
+    const canEncrypt = isCryptoInitialized && activeContact && activeContact.userId;
+    
+    console.log('🔐 Encryption check:', { 
+      isCryptoInitialized, 
+      hasActiveContact: !!activeContact,
+      hasUserId: !!activeContact?.userId,
+      canEncrypt
+    });
     
     try {
-      const response = await dispatch(sendMessage({
-        conversationId: activeId,
-        messageData: {
+      let messagePayload;
+      
+      if (canEncrypt) {
+        try {
+          console.log('🔒 Encrypting message for user:', activeContact.userId);
+          const encrypted = await encryptMessage(messageText.trim(), activeContact.userId);
+          
+          messagePayload = {
+            conversationId: activeId,
+            text: '[Encrypted]',
+            encryptedData: encrypted.ciphertext,
+            iv: encrypted.iv,
+            authTag: encrypted.authTag,
+            isEncrypted: true,
+            senderId: user?.id
+          };
+          
+          console.log('✅ Message encrypted successfully');
+          
+        } catch (encryptError) {
+          console.error('❌ Encryption failed:', encryptError);
+          messagePayload = {
+            conversationId: activeId,
+            text: messageText.trim(),
+            isEncrypted: false,
+            senderId: user?.id
+          };
+        }
+      } else {
+        console.log('⚠️  Crypto not ready, sending unencrypted');
+        messagePayload = {
           conversationId: activeId,
           text: messageText.trim(),
+          isEncrypted: false,
           senderId: user?.id
-        }
+        };
+      }
+      
+      // Send to backend
+      const response = await dispatch(sendMessage({
+        conversationId: activeId,
+        messageData: messagePayload
       }));
       
       if (response.meta.requestStatus === "fulfilled" && response.payload?.id) {
         setProcessedMessageIds(prev => new Set(prev).add(response.payload.id));
+        
+        // If encrypted, cache the decrypted version
+        if (messagePayload.isEncrypted) {
+          setDecryptedMessages(prev => ({
+            ...prev,
+            [response.payload.id]: messageText.trim()
+          }));
+        }
+        
+        // Emit via socket for real-time delivery
+        socket.emit('sendMessage', {
+          ...response.payload,
+          conversationId: activeId
+        });
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -155,24 +283,28 @@ export default function ChatPage() {
   };
 
   const handleContactClick = (contactId) => {
-    // Check if it's a group or contact
     const group = groups.find(g => g.id === contactId);
     const contact = contacts.find(c => c.id === contactId);
     
     if (group) {
-      // It's a group - navigate to group route
       setActiveId(contactId);
       dispatch(setSelectedGroup(group));
-      dispatch(setSelectedContact(null)); // Clear contact selection
+      dispatch(setSelectedContact(null));
       navigate(`/chat/group/${contactId}`, { replace: true });
     } else if (contact) {
-      // It's a contact - navigate to contact route
       setActiveId(contactId);
       dispatch(setSelectedContact(contact));
-      dispatch(setSelectedGroup(null)); // Clear group selection
+      dispatch(setSelectedGroup(null));
+      setDecryptedMessages({});
       navigate(`/chat/${contactId}`, { replace: true });
     }
   };
+
+  // Prepare messages with decrypted content
+  const displayMessages = messages.map(msg => ({
+    ...msg,
+    text: msg.isEncrypted ? (decryptedMessages[msg.id] || 'Decrypting...') : msg.text
+  }));
 
   if (isContactsLoading && contacts.length === 0) {
     return <div className="flex items-center justify-center h-screen text-gray-600 dark:text-gray-400">Loading contacts...</div>;
@@ -188,15 +320,20 @@ export default function ChatPage() {
           </Button>
         </div>
       )}
+      
+      {isCryptoInitialized && activeContact && (
+        <div className="bg-green-500/10 border-b border-green-500/20 p-1 text-xs text-green-600 dark:text-green-400 text-center">
+          🔒 End-to-end encrypted
+        </div>
+      )}
+      
       <div className="flex-1 flex w-full overflow-hidden" style={{ margin: 0, padding: 0 }}>
-        {/* Contacts Sidebar */}
         <ContactsSidebar
           contacts={contacts}
           activeId={activeId}
           setActiveId={handleContactClick}
         />
 
-        {/* Chat Area or Empty State */}
         {activeGroup ? (
           <div className="flex-1 flex flex-col items-center justify-center bg-background p-8">
             <div className="text-center max-w-md">
@@ -220,13 +357,13 @@ export default function ChatPage() {
         ) : activeContact ? (
           <ChatArea
             activeContact={activeContact}
-            messages={messages}
+            messages={displayMessages}
             loading={isMessagesLoading}
             isConnected={isConnected}
             connectError={connectError}
             handleSend={handleSend}
             currentUserId={user?.id}
-            isFriend={true} // Contacts list only shows accepted friends
+            isFriend={true}
           />
         ) : (
           <EmptyChatState currentUserId={user?.id} />
@@ -235,4 +372,3 @@ export default function ChatPage() {
     </div>
   );
 }
-

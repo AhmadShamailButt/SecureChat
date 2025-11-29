@@ -64,12 +64,12 @@ exports.getMessages = async (req, res) => {
       }
     }
 
-    // Get messages - Important: Use the ObjectID, not the string version
+    // Get messages
     const messages = await Message.find({ 
       conversationId: conversation._id.toString() 
     })
       .sort({ timestamp: 1 })
-      .limit(100); // Limit to last 100 messages
+      .limit(100);
     
     // Mark messages as read
     await Message.updateMany(
@@ -81,12 +81,17 @@ exports.getMessages = async (req, res) => {
       { $set: { read: true } }
     );
 
-    // Format messages for the front end
+    // Format messages for the front end - INCLUDE receiverId!
     const formattedMessages = messages.map(msg => ({
       id: msg._id.toString(),
       conversationId: msg.conversationId,
       senderId: msg.senderId.toString() === currentUserId.toString() ? 'me' : msg.senderId.toString(),
+      receiverId: msg.receiverId.toString(), // ← CRITICAL: Include receiverId!
       text: msg.text,
+      encryptedData: msg.encryptedData || '',
+      iv: msg.iv || '',
+      authTag: msg.authTag || '',
+      isEncrypted: msg.isEncrypted || false,
       timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       read: msg.read
     }));
@@ -103,7 +108,8 @@ exports.getMessages = async (req, res) => {
  */
 exports.postMessage = async (req, res) => {
   try {
-    let { conversationId, text } = req.body;
+    // Extract ALL fields including encryption fields
+    let { conversationId, text, encryptedData, iv, authTag, isEncrypted } = req.body;
 
     // Handle conversation IDs with "sample-" prefix
     if (conversationId.startsWith('sample-')) {
@@ -143,7 +149,7 @@ exports.postMessage = async (req, res) => {
       p => p.toString() !== currentUserId.toString()
     );
 
-    // Check if users are friends (status: "accepted") before allowing messages
+    // Check if users are friends
     if (receiverId) {
       const friendship = await Friend.findOne({
         $or: [
@@ -159,15 +165,26 @@ exports.postMessage = async (req, res) => {
       }
     }
 
-    // Create new message with the proper ObjectID conversion
-    const newMessage = new Message({
-      conversationId: conversation._id.toString(), // Make sure this is a string
+    // Create new message WITH encryption fields
+    const messageData = {
+      conversationId: conversation._id.toString(),
       senderId: currentUserId,
       receiverId,
       text,
       timestamp: new Date()
-    });
+    };
 
+    // Add encryption fields if message is encrypted
+    if (isEncrypted) {
+      messageData.encryptedData = encryptedData || '';
+      messageData.iv = iv || '';
+      messageData.authTag = authTag || '';
+      messageData.isEncrypted = true;
+    } else {
+      messageData.isEncrypted = false;
+    }
+
+    const newMessage = new Message(messageData);
     await newMessage.save();
 
     // Update conversation's last message
@@ -175,12 +192,17 @@ exports.postMessage = async (req, res) => {
     conversation.lastMessageTimestamp = new Date();
     await conversation.save();
 
-    // Format message for socket.io and response
+    // Format message for response - INCLUDE receiverId!
     const formattedMessage = {
       id: newMessage._id.toString(),
       conversationId: conversation._id.toString(),
-      senderId: 'me', // For the sender's UI
-      text,
+      senderId: 'me',
+      receiverId: newMessage.receiverId.toString(), // ← CRITICAL: Include receiverId!
+      text: newMessage.text,
+      encryptedData: newMessage.encryptedData || '',
+      iv: newMessage.iv || '',
+      authTag: newMessage.authTag || '',
+      isEncrypted: newMessage.isEncrypted || false,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       read: false
     };
@@ -193,9 +215,7 @@ exports.postMessage = async (req, res) => {
         senderId: currentUserId.toString()
       };
       
-      // Emit to both the original ID format and the clean format to ensure delivery
-      const roomId = `sample-${conversation._id.toString()}`; // If this is how your socket rooms are named
-      req.io.to(roomId).emit('newMessage', socketMessage);
+      // Emit to conversation room
       req.io.to(conversation._id.toString()).emit('newMessage', socketMessage);
     }
 
@@ -211,7 +231,7 @@ exports.postMessage = async (req, res) => {
  */
 exports.getOrCreateConversation = async (req, res) => {
   try {
-    const { userId } = req.params; // Target user to chat with
+    const { userId } = req.params;
     
     // Get current user ID from token
     const token = req.headers.authorization?.split(' ')[1];
@@ -232,25 +252,24 @@ exports.getOrCreateConversation = async (req, res) => {
       participants: { $all: [currentUserId, userId] }
     });
 
-    // If no conversation exists, create one
     if (!conversation) {
+      // Create new conversation
       conversation = new Conversation({
         participants: [currentUserId, userId],
-        lastMessage: "",
+        lastMessage: '',
         lastMessageTimestamp: new Date()
       });
-      
       await conversation.save();
     }
 
-    // Return both the regular ID and the socket room format ID
-    res.json({ 
-      conversationId: conversation._id.toString(),
-      socketRoomId: `sample-${conversation._id.toString()}`
+    res.json({
+      id: conversation._id.toString(),
+      participants: conversation.participants,
+      lastMessage: conversation.lastMessage,
+      lastMessageTimestamp: conversation.lastMessageTimestamp
     });
   } catch (error) {
-    console.error('Error creating/getting conversation:', error);
-    res.status(500).json({ error: 'Failed to create/get conversation' });
+    console.error('Error creating/fetching conversation:', error);
+    res.status(500).json({ error: 'Failed to create conversation' });
   }
 };
-
