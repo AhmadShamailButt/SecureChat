@@ -110,10 +110,7 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
       return;
     }
 
-    if (!contact.isOnline) {
-      return;
-    }
-
+    // Allow calling even if user is offline
     // Use contact.id (which is the user ID from call history)
     const contactId = contact.id;
     if (!contactId) {

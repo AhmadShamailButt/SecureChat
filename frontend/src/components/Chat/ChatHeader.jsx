@@ -10,8 +10,8 @@ export default function ChatHeader({ activeContact }) {
   const [isCallHistoryOpen, setIsCallHistoryOpen] = useState(false);
 
   const handleVoiceCall = () => {
-    if (activeContact && activeContact.isOnline) {
-      // Don't pass conversationId - let it be handled properly later
+    if (activeContact) {
+      // Allow calling even if user is offline
       dispatch(initiateCall({
         contactId: activeContact.userId,
         contactName: activeContact.name || activeContact.fullName,
@@ -65,15 +65,11 @@ export default function ChatHeader({ activeContact }) {
       </div>
       <div className="flex items-center gap-1">
         <button
-          className="p-1 rounded-full hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="p-1 rounded-full hover:bg-muted transition-colors"
           onClick={handleVoiceCall}
-          disabled={!activeContact?.isOnline}
-          title={activeContact?.isOnline ? "Start voice call" : "User is offline"}
+          title="Start voice call"
         >
-          <PhoneCall className={cn(
-            "h-5 w-5",
-            activeContact?.isOnline ? "text-muted-foreground" : "text-muted-foreground/50"
-          )} />
+          <PhoneCall className="h-5 w-5 text-muted-foreground" />
         </button>
         <button
           className="p-1 rounded-full hover:bg-muted transition-colors"

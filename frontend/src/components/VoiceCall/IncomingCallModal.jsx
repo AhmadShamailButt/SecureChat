@@ -2,8 +2,11 @@ import React from 'react';
 import { Phone, PhoneOff } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Button } from '../ui/Button';
+import { useRingingTone } from '../../hooks/useCallTones';
 
 export default function IncomingCallModal({ isOpen, callerName, onAccept, onDecline }) {
+  // Play ringing tone when modal is open
+  useRingingTone(isOpen);
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onDecline()}>
       <DialogContent className="sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>

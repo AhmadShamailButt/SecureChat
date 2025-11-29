@@ -133,16 +133,14 @@ export default function CallHistoryList({ calls, onCallClick, isLoading, onDelet
 
             {/* Action buttons */}
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {call.contact.isOnline && (
-                <Button
-                  onClick={() => onCallClick(call.contact)}
-                  className="h-8 w-8 rounded-full p-0"
-                  variant="ghost"
-                  title="Call again"
-                >
-                  <Phone className="h-4 w-4" />
-                </Button>
-              )}
+              <Button
+                onClick={() => onCallClick(call.contact)}
+                className="h-8 w-8 rounded-full p-0"
+                variant="ghost"
+                title="Call again"
+              >
+                <Phone className="h-4 w-4" />
+              </Button>
               {onDelete && (
                 <Button
                   onClick={(e) => onDelete(call.id, e)}

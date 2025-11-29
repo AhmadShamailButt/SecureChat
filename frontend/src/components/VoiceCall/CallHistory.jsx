@@ -57,10 +57,7 @@ export default function CallHistory({ isOpen, onOpenChange }) {
       return;
     }
 
-    if (!contact.isOnline) {
-      toast.error('Contact is offline');
-      return;
-    }
+    // Allow calling even if user is offline
 
     if (!user?.id) {
       toast.error('User information not available');

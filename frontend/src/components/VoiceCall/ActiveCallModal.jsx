@@ -3,6 +3,7 @@ import { Phone, Mic, MicOff, Volume2, VolumeX, PhoneOff } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
+import { useCallingTone } from '../../hooks/useCallTones';
 
 export default function ActiveCallModal({
   isOpen,
@@ -15,6 +16,9 @@ export default function ActiveCallModal({
   onToggleSpeaker,
   onEndCall
 }) {
+  // Play calling tone when status is 'calling' (caller end)
+  const isCalling = isOpen && callStatus === 'calling';
+  useCallingTone(isCalling);
   // Format duration as MM:SS
   const formattedDuration = useMemo(() => {
     const minutes = Math.floor(duration / 60);

@@ -363,8 +363,15 @@ export default function ChatPage() {
       console.log('[CALL] Call declined:', data);
       dispatch(endCall());
       endWebRTCCall();
-      toast.error('Call was declined');
-      // Refresh call history after call is declined
+      
+      // Show appropriate message based on whether it's a timeout or manual decline
+      if (data.isTimeout || data.status === 'missed') {
+        toast.error('Call missed - No answer');
+      } else {
+        toast.error('Call was declined');
+      }
+      
+      // Refresh call history after call is declined/missed
       dispatch(fetchCallHistory({ limit: 100, offset: 0 }));
     };
 
@@ -442,6 +449,35 @@ export default function ChatPage() {
       return () => clearInterval(interval);
     }
   }, [activeCall?.status, activeCall?.callId, dispatch]);
+
+  // 25-second timeout for incoming calls
+  useEffect(() => {
+    if (!incomingCall) return;
+
+    const timeout = setTimeout(() => {
+      console.log('[RECEIVER] Call timeout (25s), auto-declining and marking as missed');
+      
+      // Show message immediately for receiver
+      toast.error('Call missed - No answer');
+      
+      // Emit decline event to backend with timeout flag
+      socket?.emit('voice-call:decline', {
+        callId: incomingCall.callId,
+        receiverId: user?.id,
+        isTimeout: true // Flag to mark as missed instead of declined
+      });
+
+      // Clear incoming call
+      dispatch(clearIncomingCall());
+      dispatch(endCall());
+      endWebRTCCall();
+      
+      // Refresh call history to show missed call
+      dispatch(fetchCallHistory({ limit: 100, offset: 0 }));
+    }, 25000); // 25 seconds
+
+    return () => clearTimeout(timeout);
+  }, [incomingCall, socket, user, dispatch, endWebRTCCall]);
 
   // Voice call handler functions
   const handleAcceptCall = () => {
