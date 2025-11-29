@@ -62,23 +62,23 @@ exports.init = (server, corsOptions) => {
       // Handle joining with user information
       const conversationId = data.conversationId || data;
       const userId = data.userId || null;
-      
+
       // Handle sample- prefix if still present in frontend
-      const roomId = conversationId.startsWith('sample-') 
-        ? conversationId.replace('sample-', '') 
+      const roomId = conversationId.startsWith('sample-')
+        ? conversationId.replace('sample-', '')
         : conversationId;
-        
+
       console.log(`Socket ${socket.id} joining room ${roomId}`);
-      
+
       // Store user identifier if provided
       if (userId) {
         socketUser = userId;
         console.log(`Socket ${socket.id} associated with user ${userId}`);
-        
+
         // Join user-specific room for receiving read receipts and status updates
         socket.join(userId.toString());
         console.log(`Socket ${socket.id} joined user room: ${userId}`);
-        
+
         // Mark user as online when they join (with retry if MongoDB not ready)
         const updateStatusOnJoin = async (retries = 5) => {
           if (isConnected() || mongoose.connection.readyState === 1) {
@@ -87,7 +87,7 @@ exports.init = (server, corsOptions) => {
                 isOnline: true,
                 lastSeen: new Date()
               });
-              
+
               // Notify all other users
               socket.broadcast.emit("userStatusChanged", {
                 userId: userId,
@@ -102,18 +102,102 @@ exports.init = (server, corsOptions) => {
             setTimeout(() => updateStatusOnJoin(retries - 1), 500);
           }
         };
-        
+
         updateStatusOnJoin();
       }
-      
+
       // Add to our tracking set
       joinedRooms.add(roomId);
-      
+
       // Join the socket room
       socket.join(roomId);
-      
+
       // Confirm join to client
       socket.emit('joined', { room: roomId });
+    });
+
+    // Group chat events
+    socket.on("joinGroup", (data) => {
+      const { groupId, userId } = data;
+
+      if (!groupId) {
+        console.error("joinGroup: missing groupId");
+        return;
+      }
+
+      const roomId = `group_${groupId}`;
+      console.log(`Socket ${socket.id} joining group room ${roomId}`);
+
+      // Store user identifier if provided
+      if (userId && !socketUser) {
+        socketUser = userId;
+      }
+
+      // Add to tracking set
+      joinedRooms.add(roomId);
+
+      // Join the group room
+      socket.join(roomId);
+
+      // Confirm join to client
+      socket.emit('joinedGroup', { groupId, room: roomId });
+      console.log(`Socket ${socket.id} successfully joined group ${groupId}`);
+    });
+
+    socket.on("leaveGroup", (data) => {
+      const { groupId } = data;
+
+      if (!groupId) {
+        console.error("leaveGroup: missing groupId");
+        return;
+      }
+
+      const roomId = `group_${groupId}`;
+      console.log(`Socket ${socket.id} leaving group room ${roomId}`);
+
+      // Remove from tracking set
+      joinedRooms.delete(roomId);
+
+      // Leave the group room
+      socket.leave(roomId);
+
+      // Confirm leave to client
+      socket.emit('leftGroup', { groupId, room: roomId });
+    });
+
+    socket.on("sendGroupMessage", (msg) => {
+      const { groupId, senderId } = msg;
+
+      if (!groupId) {
+        console.error("sendGroupMessage: missing groupId");
+        return;
+      }
+
+      const roomId = `group_${groupId}`;
+      console.log(`Broadcasting group message from ${socket.id} (user: ${senderId || 'unknown'}) to room ${roomId}`);
+
+      // Broadcast to all clients in the group room EXCEPT sender
+      socket.broadcast.to(roomId).emit("newGroupMessage", msg);
+    });
+
+    socket.on("groupMessagesRead", (readReceipt) => {
+      const { groupId, messageIds, readBy, readAt } = readReceipt;
+
+      if (!groupId) {
+        console.error("groupMessagesRead: missing groupId");
+        return;
+      }
+
+      const roomId = `group_${groupId}`;
+      console.log(`Broadcasting read receipt for group ${groupId} from user ${readBy}`);
+
+      // Broadcast to all clients in the group room
+      socket.broadcast.to(roomId).emit("groupMessagesRead", {
+        groupId,
+        messageIds,
+        readBy,
+        readAt
+      });
     });
 
     // Listen for sendMessage but DON'T emit back to sender

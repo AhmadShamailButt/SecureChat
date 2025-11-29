@@ -20,6 +20,18 @@ const groupSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User"
   }],
+  isEncrypted: {
+    type: Boolean,
+    default: true
+  },
+  lastMessage: {
+    type: String,
+    default: ""
+  },
+  lastMessageTimestamp: {
+    type: Date,
+    default: null
+  },
   createdAt: {
     type: Date,
     default: Date.now
