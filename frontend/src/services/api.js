@@ -2,7 +2,7 @@ import axios from 'axios';
 import store from '../store/store';
 import { logout } from '../store/slices/userSlice';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || 'https://apisecurechat.duckdns.org';
 
 const api = axios.create({
   baseURL: API_URL,

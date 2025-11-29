@@ -22,7 +22,7 @@ const server = http.createServer(app);
 // Allow multiple localhost ports for development
 const allowedOrigins = process.env.CORS_ORIGIN 
   ? process.env.CORS_ORIGIN.split(',')
-  : ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"];
+  : ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000","https://securechat-sigma.vercel.app"];
 
 const io = initSocket(server, {
   origin: allowedOrigins,
@@ -30,7 +30,7 @@ const io = initSocket(server, {
   credentials: true
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 8005;
 
 // Middleware
 app.use(cors({

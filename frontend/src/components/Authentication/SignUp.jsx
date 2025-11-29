@@ -40,7 +40,7 @@ const SignUp = ({ onClose, onSwitchToSignIn }) => {
 
     try {
       setLoading(true);
-      const res = await axios.post("http://localhost:5000/api/auth/signup", formData);
+      const res = await axios.post(`${import.meta.env.VITE_API_URL || 'https://apisecurechat.duckdns.org'}/api/auth/signup`, formData);
       toast.success("Verification code sent to your email.");
       setEmailForVerification(formData.email);
       setShowVerify(true);

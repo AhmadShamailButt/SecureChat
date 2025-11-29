@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { toast } from 'react-hot-toast';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL =import.meta.env.VITE_API_URL || 'https://apisecurechat.duckdns.org';
 
 const VerifyAccount = ({ email, onSuccess }) => {
   const [code, setCode] = useState('');

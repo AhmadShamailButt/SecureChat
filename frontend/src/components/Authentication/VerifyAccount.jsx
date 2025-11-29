@@ -8,7 +8,7 @@ const VerifyAccount = ({ email, onSuccess }) => {
   const handleVerify = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post("http://localhost:5000/api/auth/verify", { email, code });
+      const res = await axios.post(`${import.meta.env.VITE_API_URL || 'https://apisecurechat.duckdns.org'}/api/auth/verify`, { email, code });
       toast.success("Account verified! Please sign in.");
       onSuccess(); // Opens Sign In and closes Verify
     } catch (err) {
