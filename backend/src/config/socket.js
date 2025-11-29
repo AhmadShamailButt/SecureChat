@@ -302,34 +302,96 @@ exports.init = (server, corsOptions) => {
     });
 
     // WebRTC Signaling Events
-    socket.on("voice-call:offer", (data) => {
+    socket.on("voice-call:offer", async (data) => {
       const { offer, callId, from, to } = data;
 
-      // Forward offer to receiver
-      io.to(to.toString()).emit("voice-call:offer", {
-        offer,
-        callId,
-        from
-      });
+      // Fix 5: Validate sender is authenticated and matches 'from' field
+      if (!socketUser || socketUser.toString() !== from.toString()) {
+        console.error('[SIGNALING] Unauthorized offer attempt:', { socketUser, from });
+        socket.emit('voice-call:error', { message: 'Unauthorized signaling attempt' });
+        return;
+      }
 
-      console.log(`WebRTC offer forwarded from ${from} to ${to}`);
+      // Fix 5: Validate call exists and sender is a participant
+      try {
+        const call = await Call.findById(callId);
+        if (!call) {
+          console.error('[SIGNALING] Call not found:', callId);
+          socket.emit('voice-call:error', { message: 'Call not found' });
+          return;
+        }
+
+        if (call.callerId.toString() !== from.toString() &&
+            call.receiverId.toString() !== from.toString()) {
+          console.error('[SIGNALING] User not participant in call:', { from, callId });
+          socket.emit('voice-call:error', { message: 'Not a participant in this call' });
+          return;
+        }
+
+        // Forward offer to receiver
+        io.to(to.toString()).emit("voice-call:offer", {
+          offer,
+          callId,
+          from
+        });
+
+        console.log(`[SIGNALING] WebRTC offer forwarded from ${from} to ${to}`);
+      } catch (err) {
+        console.error('[SIGNALING] Error validating call:', err);
+        socket.emit('voice-call:error', { message: 'Failed to validate call' });
+      }
     });
 
-    socket.on("voice-call:answer", (data) => {
+    socket.on("voice-call:answer", async (data) => {
       const { answer, callId, from, to } = data;
 
-      // Forward answer to caller
-      io.to(to.toString()).emit("voice-call:answer", {
-        answer,
-        callId,
-        from
-      });
+      // Fix 5: Validate sender is authenticated and matches 'from' field
+      if (!socketUser || socketUser.toString() !== from.toString()) {
+        console.error('[SIGNALING] Unauthorized answer attempt:', { socketUser, from });
+        socket.emit('voice-call:error', { message: 'Unauthorized signaling attempt' });
+        return;
+      }
 
-      console.log(`WebRTC answer forwarded from ${from} to ${to}`);
+      // Fix 5: Validate call exists and sender is a participant
+      try {
+        const call = await Call.findById(callId);
+        if (!call) {
+          console.error('[SIGNALING] Call not found:', callId);
+          socket.emit('voice-call:error', { message: 'Call not found' });
+          return;
+        }
+
+        if (call.callerId.toString() !== from.toString() &&
+            call.receiverId.toString() !== from.toString()) {
+          console.error('[SIGNALING] User not participant in call:', { from, callId });
+          socket.emit('voice-call:error', { message: 'Not a participant in this call' });
+          return;
+        }
+
+        // Forward answer to caller
+        io.to(to.toString()).emit("voice-call:answer", {
+          answer,
+          callId,
+          from
+        });
+
+        console.log(`[SIGNALING] WebRTC answer forwarded from ${from} to ${to}`);
+      } catch (err) {
+        console.error('[SIGNALING] Error validating call:', err);
+        socket.emit('voice-call:error', { message: 'Failed to validate call' });
+      }
     });
 
     socket.on("voice-call:ice-candidate", (data) => {
       const { candidate, callId, from, to } = data;
+
+      // Fix 5: Validate sender is authenticated and matches 'from' field
+      // Note: We don't validate the call for ICE candidates as it's too expensive
+      // (many candidates are sent during connection setup)
+      if (!socketUser || socketUser.toString() !== from.toString()) {
+        console.error('[SIGNALING] Unauthorized ICE candidate attempt:', { socketUser, from });
+        return; // Silently drop - ICE candidates are not critical
+      }
 
       // Forward ICE candidate to other party
       io.to(to.toString()).emit("voice-call:ice-candidate", {

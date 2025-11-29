@@ -318,33 +318,47 @@ export default function ChatPage() {
     };
 
     const handleCallAccepted = (data) => {
-      console.log('Call accepted:', data);
+      console.log('[CALLER] Call accepted:', data);
       // Set status to connected for both caller and receiver
       dispatch(setCallStatus('connected'));
-      
+
       // For caller: start WebRTC now that receiver has accepted
       if (activeCall && !activeCall.isIncoming && activeCall.callId === data.callId) {
         console.log('[CALLER] Receiver accepted, starting WebRTC call');
-        startWebRTCCall();
+        // Fix 6: Wrap in try-catch for better error handling
+        try {
+          startWebRTCCall();
+        } catch (err) {
+          console.error('[CALLER] Error starting WebRTC:', err);
+          toast.error('Failed to establish connection: ' + err.message);
+          handleEndCall();
+        }
       }
     };
 
     const handleCallDeclined = (data) => {
-      console.log('Call declined:', data);
+      console.log('[CALL] Call declined:', data);
       dispatch(endCall());
       endWebRTCCall();
-      toast.error('Call declined');
+      toast.error('Call was declined');
     };
 
     const handleCallEnded = (data) => {
-      console.log('Call ended:', data);
+      console.log('[CALL] Call ended:', data);
       dispatch(endCall());
       endWebRTCCall();
+      // Fix 6: Optional success toast when call ends normally
+      if (activeCall?.status === 'connected') {
+        toast.success('Call ended');
+      }
     };
 
     const handleCallError = (data) => {
-      console.error('Call error:', data);
-      dispatch(setCallError(data.message));
+      console.error('[CALL] Call error:', data);
+      // Fix 6: Enhanced error handling with toast notifications
+      const errorMessage = data.message || 'Call error occurred';
+      toast.error('Call error: ' + errorMessage);
+      dispatch(setCallError(errorMessage));
       dispatch(endCall());
       endWebRTCCall();
     };
@@ -420,10 +434,11 @@ export default function ChatPage() {
       });
 
       dispatch(clearIncomingCall());
-      
-      // Start WebRTC answer flow after accepting
-      console.log('[RECEIVER] Starting WebRTC answer flow after accepting call');
-      answerWebRTCCall();
+
+      // DO NOT call answerWebRTCCall() here - it causes a race condition
+      // The answer flow will be triggered automatically when the WebRTC offer arrives
+      // via the handleOffer socket event in useVoiceCall.js
+      console.log('[RECEIVER] Call accepted, waiting for WebRTC offer from caller');
     }
   };
 

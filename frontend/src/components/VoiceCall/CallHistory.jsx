@@ -52,7 +52,7 @@ export default function CallHistory({ isOpen, onOpenChange }) {
   const handleCallClick = (contact) => {
     if (contact && contact.isOnline) {
       dispatch(initiateCall({
-        contactId: contact.id,
+        contactId: contact.userId || contact.id,
         contactName: contact.name,
         conversationId: null
       }));

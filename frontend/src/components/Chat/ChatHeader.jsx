@@ -13,7 +13,7 @@ export default function ChatHeader({ activeContact }) {
     if (activeContact && activeContact.isOnline) {
       // Don't pass conversationId - let it be handled properly later
       dispatch(initiateCall({
-        contactId: activeContact.id,
+        contactId: activeContact.userId,
         contactName: activeContact.name || activeContact.fullName,
         conversationId: null // Will be set by backend based on both user IDs
       }));

@@ -83,7 +83,7 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
   const handleCallClick = (contact) => {
     if (contact && contact.isOnline) {
       dispatch(initiateCall({
-        contactId: contact.id,
+        contactId: contact.userId,
         contactName: contact.name,
         conversationId: null
       }));
