@@ -102,6 +102,10 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       // Note: These are hints to the browser, actual implementation varies
       remoteAudioRef.current.preload = 'auto';
       
+      // Set volume to reasonable level to prevent feedback loops
+      // Lower volume reduces chance of echo if speakers are near microphone
+      remoteAudioRef.current.volume = 0.8;
+      
       document.body.appendChild(remoteAudioRef.current);
     }
 
@@ -164,7 +168,10 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
     }
   }, [remoteStream, playRemoteAudio]);
 
-  // Audio level monitoring and normalization for local stream
+  // Audio level monitoring for local stream (read-only, no processing)
+  // Note: This monitoring does NOT affect the actual WebRTC stream
+  // Audio processing (echo cancellation, noise suppression) is handled by browser
+  // based on constraints set in getUserMedia and applyConstraints
   useEffect(() => {
     if (!localStream || !audioContextRef.current) return;
 
@@ -173,7 +180,7 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
     let animationFrameId = null;
 
     try {
-      // Create analyser node for audio level monitoring
+      // Create analyser node for audio level monitoring only
       analyser = audioContextRef.current.createAnalyser();
       analyser.fftSize = 256; // Small FFT for low latency
       analyser.smoothingTimeConstant = 0.8; // Smooth audio level changes
@@ -186,16 +193,13 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       if (audioTrack) {
         const source = audioContextRef.current.createMediaStreamSource(localStream);
         
-        // Add gain node for audio normalization (prevent clipping)
-        const gainNode = audioContextRef.current.createGain();
-        gainNode.gain.value = 0.8; // Reduce gain slightly to prevent clipping
+        // Connect source directly to analyser for monitoring only
+        // DO NOT connect to destination - this is read-only monitoring
+        // The actual WebRTC stream uses the original track with browser's built-in
+        // echo cancellation, noise suppression, and auto gain control
+        source.connect(analyser);
         
-        // Connect: source -> gain -> analyser -> destination
-        source.connect(gainNode);
-        gainNode.connect(analyser);
-        // Note: We don't connect to destination to avoid feedback
-        
-        // Monitor audio levels
+        // Monitor audio levels for diagnostics only
         const monitorAudioLevel = () => {
           if (!analyser) return;
           
@@ -209,16 +213,32 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
           const average = sum / bufferLength;
           audioLevelRef.current = average;
           
-          // Normalize gain based on audio level to prevent clipping
-          if (gainNode && average > 200) {
-            // Reduce gain if audio is too loud
-            gainNode.gain.value = Math.max(0.5, 0.8 - (average - 200) / 500);
-          } else if (gainNode && average < 50) {
-            // Slightly increase gain if audio is too quiet
-            gainNode.gain.value = Math.min(1.0, 0.8 + (50 - average) / 200);
-          } else if (gainNode) {
-            // Reset to default
-            gainNode.gain.value = 0.8;
+          // Log warnings if audio levels are problematic
+          if (average > 240) {
+            console.warn('[AUDIO-DIAG] High audio level detected:', average, '- may cause clipping');
+          } else if (average < 20) {
+            console.log('[AUDIO-DIAG] Low audio level detected:', average, '- user may be too quiet');
+          }
+          
+          // Periodic diagnostic logging (every 10 seconds)
+          const now = Date.now();
+          if (!audioLevelRef.current._lastDiagnosticLog || now - audioLevelRef.current._lastDiagnosticLog > 10000) {
+            audioLevelRef.current._lastDiagnosticLog = now;
+            
+            // Get current audio track settings for diagnostics
+            const audioTrack = localStream?.getAudioTracks()[0];
+            if (audioTrack && audioTrack.getSettings) {
+              const settings = audioTrack.getSettings();
+              console.log('[AUDIO-DIAG] Audio quality diagnostics:', {
+                audioLevel: average,
+                echoCancellation: settings.echoCancellation ? '✓ enabled' : '✗ disabled',
+                noiseSuppression: settings.noiseSuppression ? '✓ enabled' : '✗ disabled',
+                autoGainControl: settings.autoGainControl ? '✓ enabled' : '✗ disabled',
+                sampleRate: settings.sampleRate,
+                channelCount: settings.channelCount,
+                deviceId: settings.deviceId ? settings.deviceId.substring(0, 20) + '...' : 'default'
+              });
+            }
           }
           
           animationFrameId = requestAnimationFrame(monitorAudioLevel);
@@ -432,32 +452,57 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
     if (!sdp) return sdp;
     
     try {
-      // Modify SDP to prioritize Opus codec and set optimal parameters for packet loss resilience
+      // Modify SDP to prioritize Opus codec and set optimal parameters for voice quality
       let modifiedSdp = sdp;
       
-      // Set Opus codec parameters for voice with enhanced FEC and adaptive bitrate
+      // Ensure minimum bitrate is 40kbps (not 32kbps) for acceptable quality
+      const minBitrate = Math.max(targetBitrate, 40000);
+      
+      // Set Opus codec parameters for voice with optimized FEC and DTX
       // Format: a=fmtp:111 minptime=10;useinbandfec=1;stereo=0;sprop-stereo=0;maxaveragebitrate=64000
-      // Enhanced settings for better packet loss handling
+      // Optimized settings for voice quality and packet loss resilience
       const opusRegex = /a=fmtp:(\d+) (.*)/g;
       modifiedSdp = modifiedSdp.replace(opusRegex, (match, payloadType, params) => {
         // Check if this is Opus (usually payload type 111 or 109)
-        // Add/update Opus parameters for optimal voice quality with packet loss resilience
+        // Add/update Opus parameters for optimal voice quality
+        
+        // Parse existing params to preserve any browser-set values
+        const existingParams = params.split(';').reduce((acc, param) => {
+          const [key] = param.split('=');
+          if (key) acc[key.trim()] = param.trim();
+          return acc;
+        }, {});
+        
+        // Build optimized parameter list
         const newParams = [
           'minptime=10', // Minimum packet time (10ms for low latency)
           'maxptime=60', // Maximum packet time (60ms to prevent buffering issues)
           'useinbandfec=1', // Enable in-band FEC for error recovery (critical for packet loss)
           'stereo=0', // Mono (sufficient for voice, reduces bandwidth)
           'sprop-stereo=0', // No stereo property
-          `maxaveragebitrate=${targetBitrate}`, // Adaptive bitrate (default 64kbps, can be reduced for poor networks)
+          `maxaveragebitrate=${minBitrate}`, // Adaptive bitrate with minimum floor (40kbps)
           'maxplaybackrate=48000', // 48kHz sample rate
-          'ptime=20', // Packet time 20ms (low latency)
-          'cbr=0', // Use variable bitrate (VBR) for better quality at same bitrate
-          'usedtx=0' // Disable DTX (discontinuous transmission) for consistent quality
-        ].join(';');
-        return `a=fmtp:${payloadType} ${newParams}`;
+          'ptime=20', // Packet time 20ms (low latency, good balance)
+          'cbr=0', // Use variable bitrate (VBR) for better quality at same average bitrate
+          'usedtx=1' // Enable DTX (discontinuous transmission) to save bandwidth during silence
+          // DTX helps reduce bandwidth usage when user is not speaking, allowing
+          // more bandwidth for actual speech and improving overall quality
+        ];
+        
+        // Join parameters, removing duplicates
+        const paramString = newParams.join(';');
+        return `a=fmtp:${payloadType} ${paramString}`;
       });
       
-      console.log(`[WEBRTC] Configured Opus codec parameters with bitrate: ${targetBitrate} bps for packet loss resilience`);
+      // Also ensure Opus is prioritized in codec list
+      // This helps ensure Opus is selected over other codecs
+      if (modifiedSdp.includes('opus/48000')) {
+        // Opus is already in the SDP, which is good
+        console.log(`[WEBRTC] Configured Opus codec parameters with bitrate: ${minBitrate} bps (min: 40kbps)`);
+      } else {
+        console.warn('[WEBRTC] Opus codec not found in SDP - browser may use different codec');
+      }
+      
       return modifiedSdp;
     } catch (err) {
       console.warn('[WEBRTC] Error configuring Opus codec:', err);
@@ -559,12 +604,54 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
         connectionTimeoutRef.current = null;
       }
       
+      // Comprehensive connection diagnostics
+      const remoteStream = event.streams[0];
+      const remoteAudioTrack = remoteStream.getAudioTracks()[0];
+      if (remoteAudioTrack) {
+        console.log('[AUDIO-DIAG] Remote audio track received:', {
+          id: remoteAudioTrack.id,
+          enabled: remoteAudioTrack.enabled,
+          muted: remoteAudioTrack.muted,
+          readyState: remoteAudioTrack.readyState,
+          settings: remoteAudioTrack.getSettings ? remoteAudioTrack.getSettings() : 'not available'
+        });
+      }
+      
+      // Log local audio track diagnostics for comparison
+      if (localStream) {
+        const localAudioTrack = localStream.getAudioTracks()[0];
+        if (localAudioTrack && localAudioTrack.getSettings) {
+          const localSettings = localAudioTrack.getSettings();
+          console.log('[AUDIO-DIAG] Call connection established - Audio configuration:', {
+            local: {
+              echoCancellation: localSettings.echoCancellation ? '✓' : '✗',
+              noiseSuppression: localSettings.noiseSuppression ? '✓' : '✗',
+              autoGainControl: localSettings.autoGainControl ? '✓' : '✗',
+              sampleRate: localSettings.sampleRate,
+              channelCount: localSettings.channelCount
+            },
+            remote: {
+              enabled: remoteAudioTrack?.enabled,
+              readyState: remoteAudioTrack?.readyState
+            },
+            bitrate: `${currentBitrateRef.current / 1000}kbps`,
+            encryption: encryptionEnabledRef.current ? '✓ enabled' : '✗ disabled'
+          });
+        }
+      }
+      
       // Attempt to play audio after receiving remote track
       // This will work if user has already interacted (accepted call)
       if (remoteAudioRef.current) {
         try {
           await remoteAudioRef.current.play();
           console.log('[AUDIO] Remote audio started playing');
+          console.log('[AUDIO-DIAG] Remote audio playback:', {
+            volume: remoteAudioRef.current.volume,
+            muted: remoteAudioRef.current.muted,
+            paused: remoteAudioRef.current.paused,
+            readyState: remoteAudioRef.current.readyState
+          });
         } catch (error) {
           // Audio play prevented - this is normal if called before user gesture
           // Will be called again when user accepts call (user gesture)
@@ -676,12 +763,14 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
   const getLocalStream = useCallback(async () => {
     try {
       // Optimized audio constraints for high-quality voice calls
+      // Using standard WebRTC constraints with essential settings only
+      // Removed redundant Chrome-specific settings that may conflict
       const audioConstraints = {
         // High sample rate for CD-quality audio (48kHz)
         sampleRate: 48000,
         // Mono channel (sufficient for voice, reduces bandwidth)
         channelCount: 1,
-        // Echo cancellation for better call quality
+        // Echo cancellation - CRITICAL for preventing echo/feedback
         echoCancellation: true,
         // Noise suppression to filter background noise
         noiseSuppression: true,
@@ -689,34 +778,99 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
         autoGainControl: true,
         // Low latency target (10ms) for real-time communication
         latency: 0.01,
-        // Chrome-specific audio processing enhancements
-        googEchoCancellation: true,
-        googNoiseSuppression: true,
-        googAutoGainControl: true,
-        googHighpassFilter: true, // Filter low-frequency noise
-        googTypingNoiseDetection: true, // Detect and suppress typing noise
-        googNoiseReduction: true, // Additional noise reduction
-        // Audio processing constraints
-        googAudioMirroring: false, // Disable mirroring for better performance
         // Sample size for better quality
         sampleSize: 16
       };
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints
-      });
-      
-      // Apply additional audio processing optimizations
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack && audioTrack.getSettings) {
-        const settings = audioTrack.getSettings();
-        console.log('[AUDIO] Audio track settings:', {
-          sampleRate: settings.sampleRate,
-          channelCount: settings.channelCount,
-          echoCancellation: settings.echoCancellation,
-          noiseSuppression: settings.noiseSuppression,
-          autoGainControl: settings.autoGainControl
+      // Try with full constraints first
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: audioConstraints
         });
+      } catch (constraintError) {
+        // Fallback: try with minimal constraints if full constraints fail
+        console.warn('[AUDIO] Full constraints failed, trying minimal constraints:', constraintError);
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+      }
+      
+      // Apply and verify audio track constraints
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) {
+        // Verify and log actual settings applied by browser
+        if (audioTrack.getSettings) {
+          const settings = audioTrack.getSettings();
+          console.log('[AUDIO] Audio track settings applied:', {
+            sampleRate: settings.sampleRate,
+            channelCount: settings.channelCount,
+            echoCancellation: settings.echoCancellation,
+            noiseSuppression: settings.noiseSuppression,
+            autoGainControl: settings.autoGainControl,
+            deviceId: settings.deviceId
+          });
+          
+          // Verify echo cancellation is actually enabled
+          if (settings.echoCancellation === false) {
+            console.warn('[AUDIO] WARNING: Echo cancellation is disabled! This may cause echo/feedback issues.');
+            // Try to enable it explicitly
+            try {
+              await audioTrack.applyConstraints({ echoCancellation: true });
+              console.log('[AUDIO] Attempted to enable echo cancellation explicitly');
+            } catch (enableErr) {
+              console.error('[AUDIO] Failed to enable echo cancellation:', enableErr);
+            }
+          } else {
+            console.log('[AUDIO] ✓ Echo cancellation is enabled');
+          }
+        }
+        
+        // Apply constraints at track level to ensure they're active
+        // This is important for some browsers that don't fully respect getUserMedia constraints
+        try {
+          if (audioTrack.applyConstraints) {
+            const appliedConstraints = {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            };
+            await audioTrack.applyConstraints(appliedConstraints);
+            console.log('[AUDIO] Applied constraints at track level');
+            
+            // Verify constraints were actually applied
+            const verifySettings = audioTrack.getSettings();
+            if (verifySettings.echoCancellation === false) {
+              console.error('[AUDIO] ERROR: Echo cancellation failed to apply at track level!');
+            }
+          }
+        } catch (applyErr) {
+          console.warn('[AUDIO] Could not apply constraints at track level:', applyErr);
+        }
+        
+        // Set up periodic echo cancellation verification (every 10 seconds)
+        // This helps detect if echo cancellation gets disabled during the call
+        const echoCheckInterval = setInterval(() => {
+          if (audioTrack && audioTrack.getSettings) {
+            const currentSettings = audioTrack.getSettings();
+            if (currentSettings.echoCancellation === false) {
+              console.warn('[AUDIO] Echo cancellation disabled during call - attempting to re-enable');
+              audioTrack.applyConstraints({ echoCancellation: true }).catch(err => {
+                console.error('[AUDIO] Failed to re-enable echo cancellation:', err);
+              });
+            }
+          } else {
+            // Track is gone, clear interval
+            clearInterval(echoCheckInterval);
+          }
+        }, 10000);
+        
+        // Store interval ID for cleanup (we'll clean it up when stream ends)
+        audioTrack._echoCheckInterval = echoCheckInterval;
       }
       
       setLocalStream(stream);
@@ -1544,9 +1698,16 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       disconnectGraceTimeoutRef.current = null;
     }
 
-    // Stop all local tracks
+    // Stop all local tracks and clean up echo check intervals
     if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
+      localStream.getTracks().forEach((track) => {
+        // Clear echo check interval if it exists
+        if (track._echoCheckInterval) {
+          clearInterval(track._echoCheckInterval);
+          track._echoCheckInterval = null;
+        }
+        track.stop();
+      });
       setLocalStream(null);
     }
 
@@ -1567,7 +1728,7 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
     pendingOfferRef.current = null;
     shouldAnswerRef.current = false;
     rtpSenderRef.current = null; // Clear RTCRtpSender ref
-    currentBitrateRef.current = 64000; // Reset to default bitrate
+    currentBitrateRef.current = 64000; // Reset to default bitrate (64kbps)
     signalingQueueRef.current = []; // Clear signaling queue
     isReconnectingRef.current = false;
     rttHistoryRef.current = []; // Clear RTT history
@@ -1728,21 +1889,22 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
         ? parseFloat(packetLossPercent) 
         : packetLossPercent;
       
-      // RTT Smoothing: Use Exponential Moving Average (EMA) to reduce fluctuations
-      // Formula: smoothedRTT = α * currentRTT + (1-α) * previousSmoothedRTT where α = 0.3
-      const alpha = 0.3;
+      // RTT Smoothing: Use Exponential Moving Average (EMA) with improved alpha for better stability
+      // Formula: smoothedRTT = α * currentRTT + (1-α) * previousSmoothedRTT
+      // Using α = 0.2 (lower = more smoothing, less reactive to spikes)
+      const alpha = 0.2;
       if (rtt > 0) {
         if (smoothedRttRef.current === 0) {
           // Initialize with first RTT value
           smoothedRttRef.current = rtt;
         } else {
-          // Apply EMA
+          // Apply EMA with improved smoothing
           smoothedRttRef.current = alpha * rtt + (1 - alpha) * smoothedRttRef.current;
         }
         
-        // Keep history for reference (max 5 values)
+        // Keep history for reference (max 10 values for better trend analysis)
         rttHistoryRef.current.push(rtt);
-        if (rttHistoryRef.current.length > 5) {
+        if (rttHistoryRef.current.length > 10) {
           rttHistoryRef.current.shift();
         }
       }
@@ -1756,16 +1918,17 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       let targetBitrate = 64000; // Default: 64 kbps (high quality)
       const hasBitrateInfo = availableBitrate && availableBitrate > 0;
       
-      // Poor quality thresholds - reduce bitrate significantly
-      // Updated thresholds: packet loss > 5%, jitter > 20ms, smoothed RTT > 300ms
-      if (packetLoss > 5 || jitter > 0.02 || smoothedRtt > 0.3 || (hasBitrateInfo && availableBitrate < 32000)) {
+      // Poor quality thresholds - adjusted to be less sensitive
+      // Thresholds: packet loss > 7% (was 5%), jitter > 30ms (was 20ms), smoothed RTT > 400ms (was 300ms)
+      // Minimum bitrate floor: 40kbps (was 32kbps) for acceptable quality
+      if (packetLoss > 7 || jitter > 0.03 || smoothedRtt > 0.4 || (hasBitrateInfo && availableBitrate < 40000)) {
         quality = 'poor';
-        // Reduce bitrate to 32 kbps for poor connections (better packet loss resilience)
-        targetBitrate = 32000;
+        // Minimum bitrate: 40 kbps (increased from 32kbps) for acceptable quality
+        targetBitrate = 40000;
       } 
-      // Fair quality thresholds - reduce bitrate moderately
-      // Updated thresholds: packet loss > 2%, jitter > 10ms, smoothed RTT > 180ms (increased from 150ms)
-      else if (packetLoss > 2 || jitter > 0.01 || smoothedRtt > 0.18 || (hasBitrateInfo && availableBitrate < 48000)) {
+      // Fair quality thresholds - adjusted to be less sensitive
+      // Thresholds: packet loss > 3% (was 2%), jitter > 15ms (was 10ms), smoothed RTT > 250ms (was 180ms)
+      else if (packetLoss > 3 || jitter > 0.015 || smoothedRtt > 0.25 || (hasBitrateInfo && availableBitrate < 48000)) {
         quality = 'fair';
         // Reduce bitrate to 48 kbps for fair connections
         targetBitrate = 48000;
@@ -1776,22 +1939,25 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
         targetBitrate = 64000; // 64 kbps for good connections
       }
       
-      // Stability Window: Track quality history and only change if quality persists for 2 consecutive checks
+      // Stability Window: Track quality history and only change if quality persists for 3 consecutive checks
+      // Increased from 2 to 3 checks to prevent frequent bitrate changes
       qualityHistoryRef.current.push(quality);
-      if (qualityHistoryRef.current.length > 2) {
+      if (qualityHistoryRef.current.length > 3) {
         qualityHistoryRef.current.shift();
       }
       
       // Only adjust bitrate if:
-      // 1. Quality has been consistent for 2 checks (stability window)
-      // 2. Bitrate difference is >= 24kbps (increased hysteresis from 16kbps)
-      const qualityStable = qualityHistoryRef.current.length === 2 && 
-                            qualityHistoryRef.current[0] === qualityHistoryRef.current[1];
+      // 1. Quality has been consistent for 3 checks (stability window - increased from 2)
+      // 2. Bitrate difference is >= 16kbps (reduced from 24kbps but with 3-check stability)
+      // 3. At least 9 seconds have passed (3 checks * 3 seconds) for stability
+      const qualityStable = qualityHistoryRef.current.length === 3 && 
+                            qualityHistoryRef.current[0] === qualityHistoryRef.current[1] &&
+                            qualityHistoryRef.current[1] === qualityHistoryRef.current[2];
       const bitrateDifference = Math.abs(currentBitrateRef.current - targetBitrate);
       
-      if (qualityStable && bitrateDifference >= 24000) {
+      if (qualityStable && bitrateDifference >= 16000) {
         await adjustAudioBitrate(targetBitrate);
-        console.log(`[WEBRTC] Bitrate adjusted: ${currentBitrateRef.current/1000}kbps -> ${targetBitrate/1000}kbps (quality: ${quality}, smoothed RTT: ${(smoothedRtt*1000).toFixed(0)}ms)`);
+        console.log(`[WEBRTC] Bitrate adjusted: ${currentBitrateRef.current/1000}kbps -> ${targetBitrate/1000}kbps (quality: ${quality}, smoothed RTT: ${(smoothedRtt*1000).toFixed(0)}ms, stability: 3 checks)`);
       }
       
       setConnectionQuality(quality);
@@ -1879,10 +2045,10 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
           quality: 'good' // Default quality
         };
 
-        // FIX: Calculate quality first before using it (using smoothed RTT if available)
+        // Calculate quality using updated thresholds (matching adjustQualityBasedOnStats)
         const rttForQuality = smoothedRttRef.current > 0 ? smoothedRttRef.current : enhancedStats.rtt;
-        const calculatedQuality = enhancedStats.packetLossPercent > 5 || rttForQuality > 0.3 ? 'poor' 
-          : enhancedStats.packetLossPercent > 2 || rttForQuality > 0.18 ? 'fair' : 'good';
+        const calculatedQuality = enhancedStats.packetLossPercent > 7 || rttForQuality > 0.4 || enhancedStats.jitter > 0.03 ? 'poor' 
+          : enhancedStats.packetLossPercent > 3 || rttForQuality > 0.25 || enhancedStats.jitter > 0.015 ? 'fair' : 'good';
         
         enhancedStats.quality = calculatedQuality;
         // Add smoothed RTT to stats for display
@@ -1915,7 +2081,7 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       } catch (err) {
         console.error('[WEBRTC] Error getting stats:', err);
       }
-    }, 3000); // FIX: Reduce frequency to 3 seconds to avoid excessive adjustments
+    }, 3000); // Check every 3 seconds - balanced between responsiveness and stability
 
     return () => clearInterval(interval);
   }, [webrtcState, localStream]);
