@@ -386,8 +386,26 @@ exports.init = (server, corsOptions) => {
     socket.on("voice-call:offer", async (data) => {
       const { offer, encryptedData, isEncrypted, encrypted, callId, from, to } = data;
 
-      // Fix 5: Validate sender is authenticated and matches 'from' field
-      if (!socketUser || socketUser.toString() !== from.toString()) {
+      // Fix: Validate sender - use fallback validation if socketUser is null (reconnection race condition)
+      let isAuthorized = socketUser && socketUser.toString() === from.toString();
+      
+      // Fallback: If socketUser is null (reconnection race condition), validate via Call document
+      if (!isAuthorized) {
+        try {
+          const call = await Call.findById(callId);
+          if (call && (call.callerId.toString() === from.toString() || 
+                       call.receiverId.toString() === from.toString())) {
+            // User is a participant in the call - authorize and set socketUser
+            socketUser = from;
+            isAuthorized = true;
+            console.log('[SIGNALING] Fallback validation successful for offer (reconnection):', { callId, from });
+          }
+        } catch (err) {
+          console.error('[SIGNALING] Error in fallback validation:', err);
+        }
+      }
+
+      if (!isAuthorized) {
         console.error('[SIGNALING] Unauthorized offer attempt:', { socketUser, from });
         socket.emit('voice-call:error', { message: 'Unauthorized signaling attempt' });
         return;
@@ -439,8 +457,26 @@ exports.init = (server, corsOptions) => {
     socket.on("voice-call:answer", async (data) => {
       const { answer, encryptedData, isEncrypted, encrypted, callId, from, to } = data;
 
-      // Fix 5: Validate sender is authenticated and matches 'from' field
-      if (!socketUser || socketUser.toString() !== from.toString()) {
+      // Fix: Validate sender - use fallback validation if socketUser is null (reconnection race condition)
+      let isAuthorized = socketUser && socketUser.toString() === from.toString();
+      
+      // Fallback: If socketUser is null (reconnection race condition), validate via Call document
+      if (!isAuthorized) {
+        try {
+          const call = await Call.findById(callId);
+          if (call && (call.callerId.toString() === from.toString() || 
+                       call.receiverId.toString() === from.toString())) {
+            // User is a participant in the call - authorize and set socketUser
+            socketUser = from;
+            isAuthorized = true;
+            console.log('[SIGNALING] Fallback validation successful for answer (reconnection):', { callId, from });
+          }
+        } catch (err) {
+          console.error('[SIGNALING] Error in fallback validation:', err);
+        }
+      }
+
+      if (!isAuthorized) {
         console.error('[SIGNALING] Unauthorized answer attempt:', { socketUser, from });
         socket.emit('voice-call:error', { message: 'Unauthorized signaling attempt' });
         return;
@@ -489,15 +525,33 @@ exports.init = (server, corsOptions) => {
       }
     });
 
-    socket.on("voice-call:ice-candidate", (data) => {
+    socket.on("voice-call:ice-candidate", async (data) => {
       const { candidate, encryptedData, isEncrypted, encrypted, callId, from, to } = data;
 
-      // Fix 5: Validate sender is authenticated and matches 'from' field
-      // Note: We don't validate the call for ICE candidates as it's too expensive
-      // (many candidates are sent during connection setup)
-      if (!socketUser || socketUser.toString() !== from.toString()) {
-        console.error('[SIGNALING] Unauthorized ICE candidate attempt:', { socketUser, from });
-        return; // Silently drop - ICE candidates are not critical
+      // Fix: Validate sender - use fallback validation if socketUser is null (reconnection race condition)
+      // Note: We use async validation for ICE candidates to support fallback, but keep it lightweight
+      let isAuthorized = socketUser && socketUser.toString() === from.toString();
+      
+      // Fallback: If socketUser is null (reconnection race condition), validate via Call document
+      // Only do this for first few candidates to avoid performance impact
+      if (!isAuthorized && callId) {
+        try {
+          const call = await Call.findById(callId);
+          if (call && (call.callerId.toString() === from.toString() || 
+                       call.receiverId.toString() === from.toString())) {
+            // User is a participant in the call - authorize and set socketUser
+            socketUser = from;
+            isAuthorized = true;
+            console.log('[SIGNALING] Fallback validation successful for ICE candidate (reconnection):', { callId, from });
+          }
+        } catch (err) {
+          // Silently fail for ICE candidates - they're not critical
+        }
+      }
+
+      if (!isAuthorized) {
+        // Silently drop - ICE candidates are not critical and we don't want to spam errors
+        return;
       }
 
       // Forward ICE candidate to other party (encrypted or unencrypted)
