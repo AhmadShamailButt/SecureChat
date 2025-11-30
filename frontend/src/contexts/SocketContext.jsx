@@ -9,7 +9,9 @@ const SocketContext = createContext({
   socket: null,
   isConnected: false,
   connectError: null,
-  reconnect: () => {}
+  reconnect: () => {},
+  onReconnect: null,
+  setOnReconnect: () => {}
 });
 
 // Provider component
@@ -17,6 +19,7 @@ export const SocketProvider = ({ children }) => {
   const socketRef = useRef(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectError, setConnectError] = useState(null);
+  const onReconnectCallbackRef = useRef(null);
 
   useEffect(() => {
     console.log('[SOCKET] Initializing connection to:', API_URL);
@@ -44,6 +47,16 @@ export const SocketProvider = ({ children }) => {
       console.log('✅ Socket connected with ID:', socket.id);
       setIsConnected(true);
       setConnectError(null);
+      
+      // Trigger reconnection callback if set (also for initial connection)
+      if (onReconnectCallbackRef.current) {
+        console.log('[SOCKET] Triggering reconnection callback on connect');
+        try {
+          onReconnectCallbackRef.current(socket);
+        } catch (error) {
+          console.error('[SOCKET] Error in reconnection callback:', error);
+        }
+      }
     };
 
     const onDisconnect = (reason) => {
@@ -83,6 +96,16 @@ export const SocketProvider = ({ children }) => {
       console.log(`🔄 Socket reconnected after ${attemptNumber} attempts`);
       setIsConnected(true);
       setConnectError(null);
+      
+      // Trigger reconnection callback if set
+      if (onReconnectCallbackRef.current) {
+        console.log('[SOCKET] Triggering reconnection callback');
+        try {
+          onReconnectCallbackRef.current(socket);
+        } catch (error) {
+          console.error('[SOCKET] Error in reconnection callback:', error);
+        }
+      }
     };
 
     const onReconnectAttempt = (attemptNumber) => {
@@ -126,12 +149,19 @@ export const SocketProvider = ({ children }) => {
     }
   };
 
+  // Set reconnection callback
+  const setOnReconnect = (callback) => {
+    onReconnectCallbackRef.current = callback;
+  };
+
   return (
     <SocketContext.Provider value={{ 
       socket: socketRef.current, 
       isConnected, 
       connectError, 
-      reconnect 
+      reconnect,
+      onReconnect: onReconnectCallbackRef.current,
+      setOnReconnect
     }}>
       {children}
     </SocketContext.Provider>

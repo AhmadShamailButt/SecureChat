@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useSocket } from '../contexts/SocketContext';
 import { useCrypto } from '../contexts/CryptoContext';
@@ -36,7 +36,7 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const dispatch = useDispatch();
-  const { socket, isConnected, connectError, reconnect } = useSocket();
+  const { socket, isConnected, connectError, reconnect, setOnReconnect } = useSocket();
   
   // Encryption Hooks
   const { encryptMessage, decryptMessage, isInitialized: isCryptoInitialized } = useCrypto();
@@ -221,6 +221,35 @@ export default function ChatPage() {
     decryptMessagesAsync();
   }, [messages, isCryptoInitialized, user, activeContact, decryptMessage]);
 
+  // Helper function to rejoin all necessary rooms
+  const rejoinRooms = useCallback(() => {
+    if (!socket || !user?.id) {
+      console.log('[SOCKET] Cannot rejoin rooms: socket or user not available');
+      return;
+    }
+
+    console.log('[SOCKET] Rejoining rooms after reconnection...');
+    
+    // Rejoin user-specific room for receiving read receipts and voice calls
+    console.log('[SOCKET] Rejoining user room:', user.id);
+    socket.emit('userOnline', { userId: user.id });
+    socket.emit('join', {
+      conversationId: user.id,
+      userId: user.id
+    });
+
+    // Rejoin conversation room if there's an active conversation
+    if (activeId && !activeGroup) {
+      const sortedIds = [user?.id, activeId].filter(Boolean).sort();
+      const conversationRoomId = `msg_${sortedIds[0]}_${sortedIds[1]}`;
+      console.log('[SOCKET] Rejoining conversation room:', conversationRoomId);
+      socket.emit('join', {
+        conversationId: conversationRoomId,
+        userId: user?.id
+      });
+    }
+  }, [socket, user, activeId, activeGroup]);
+
   // Emit user online status when connected and join user-specific room
   useEffect(() => {
     if (isConnected && socket && user?.id) {
@@ -234,6 +263,23 @@ export default function ChatPage() {
       });
     }
   }, [isConnected, socket, user]);
+
+  // Set up reconnection handler
+  useEffect(() => {
+    if (!setOnReconnect) return;
+
+    // Set the reconnection callback
+    setOnReconnect((reconnectedSocket) => {
+      console.log('[SOCKET] Reconnection detected, rejoining rooms...');
+      // Rejoin all necessary rooms
+      rejoinRooms();
+    });
+
+    // Cleanup: remove callback on unmount
+    return () => {
+      setOnReconnect(null);
+    };
+  }, [setOnReconnect, rejoinRooms]);
 
   // Listen for user status changes (online/offline)
   useEffect(() => {

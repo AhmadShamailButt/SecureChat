@@ -1484,16 +1484,38 @@ const useVoiceCall = (socket, callId, isInitiator, receiverId, callerId) => {
       }
     };
 
+    const handleReconnect = () => {
+      console.log('[WEBRTC] Socket reconnected during voice call');
+      
+      // If there's an active call during reconnection, log warning
+      if (callId && (webrtcState !== 'idle' && webrtcState !== 'ended')) {
+        console.warn('[WEBRTC] Active call detected during reconnection:', {
+          callId,
+          state: webrtcState,
+          isInitiator,
+          receiverId,
+          callerId
+        });
+        
+        // Note: Room rejoining is handled by ChatPage's reconnection handler
+        // This is just for logging and potential future retry logic
+      }
+    };
+
     socket.on('voice-call:offer', handleOffer);
     socket.on('voice-call:answer', handleAnswerEvent);
     socket.on('voice-call:ice-candidate', handleIceCandidateEvent);
+    socket.on('connect', handleReconnect);
+    socket.on('reconnect', handleReconnect);
 
     return () => {
       socket.off('voice-call:offer', handleOffer);
       socket.off('voice-call:answer', handleAnswerEvent);
       socket.off('voice-call:ice-candidate', handleIceCandidateEvent);
+      socket.off('connect', handleReconnect);
+      socket.off('reconnect', handleReconnect);
     };
-  }, [socket, callId, answerCall, handleAnswer, handleIceCandidate, isInitiator]);
+  }, [socket, callId, answerCall, handleAnswer, handleIceCandidate, isInitiator, webrtcState, receiverId, callerId]);
 
   // Cleanup on unmount only (not on re-render)
   useEffect(() => {
