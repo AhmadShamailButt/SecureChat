@@ -70,21 +70,53 @@ const FileMessage = ({ message, isOwn, sharedSecret }) => {
       
       const encryptedData = await fileResponse.arrayBuffer();
 
-      // Step 3: Decrypt file key
+      // Step 3: Use the encryption key directly from the message
       setDownloadProgress(60);
-      const encryptedKeyData = JSON.parse(metadata.encryptedFileKey);
-      const fileKey = await fileEncryption.decryptFileKey(
-        encryptedKeyData, 
-        new Uint8Array(sharedSecret)
-      );
+      
+      // Check if we have the encryption key in the message (newer approach)
+      let fileKey;
+      if (message.encryptionKey) {
+        // Use the encryption key stored in the message
+        fileKey = await fileEncryption.importKey(message.encryptionKey);
+      } else {
+        // Fallback to decrypting with shared secret (for compatibility)
+        const encryptedKeyData = JSON.parse(metadata.encryptedFileKey);
+        const iv = JSON.parse(metadata.iv);
+        
+        // Convert sharedSecret to proper CryptoKey if it's a string
+        let sharedKey;
+        if (typeof sharedSecret === 'string') {
+          // For default/temporary shared secret, create a key from the string
+          const encoder = new TextEncoder();
+          const keyMaterial = encoder.encode(sharedSecret.padEnd(32, '0').substring(0, 32));
+          sharedKey = await window.crypto.subtle.importKey(
+            'raw',
+            keyMaterial,
+            { name: 'AES-GCM' },
+            false,
+            ['encrypt', 'decrypt']
+          );
+        } else {
+          sharedKey = sharedSecret;
+        }
+        
+        fileKey = await fileEncryption.decryptFileKey(
+          encryptedKeyData, 
+          iv,
+          sharedKey
+        );
+      }
 
       // Step 4: Decrypt file
       setDownloadProgress(80);
-      const iv = JSON.parse(metadata.iv);
+      
+      // Use IV from message if available, otherwise from metadata
+      const fileIv = message.encryptionIv || JSON.parse(metadata.iv);
+      
       const decryptedData = await fileEncryption.decryptFile(
         encryptedData, 
         fileKey, 
-        iv
+        fileIv
       );
 
       // Step 5: Verify integrity
