@@ -1,0 +1,271 @@
+/* FileDownload.css */
+.file-download {
+  max-width: 400px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 16px;
+  background-color: #fff;
+  font-family: inherit;
+  margin: 8px 0;
+}
+
+.file-download.compact {
+  max-width: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background-color: #f8f9fa;
+  position: relative;
+}
+
+.file-preview {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.file-icon-large {
+  font-size: 48px;
+  flex-shrink: 0;
+}
+
+.file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-download.compact .file-info {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+.file-download.compact .file-info .file-icon {
+  font-size: 20px;
+  margin-right: 8px;
+}
+
+.file-name {
+  font-weight: 600;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+  font-size: 1em;
+}
+
+.file-download.compact .file-name {
+  font-size: 0.9em;
+  margin-bottom: 2px;
+}
+
+.file-size {
+  color: #666;
+  font-size: 0.85em;
+  margin-bottom: 2px;
+}
+
+.file-date {
+  color: #888;
+  font-size: 0.8em;
+}
+
+.download-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.download-btn {
+  padding: 10px 20px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9em;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.download-btn:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.download-btn:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+}
+
+.download-btn.compact {
+  padding: 6px 8px;
+  min-width: 40px;
+  font-size: 1.1em;
+}
+
+.download-progress {
+  width: 100%;
+}
+
+.file-download.compact .download-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 0 0 6px 6px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background-color: #f0f0f0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.file-download.compact .progress-bar {
+  height: 100%;
+  margin-bottom: 0;
+  border-radius: 0;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #28a745, #20c997);
+  transition: width 0.3s ease;
+  border-radius: 4px;
+}
+
+.file-download.compact .progress-fill {
+  border-radius: 0;
+}
+
+.progress-text {
+  text-align: center;
+  font-size: 0.75em;
+  color: #666;
+  font-weight: 500;
+}
+
+.download-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  color: #721c24;
+  font-size: 0.85em;
+}
+
+.file-download.compact .download-error {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  padding: 2px;
+  background: #dc3545;
+  border-radius: 50%;
+  border: 2px solid white;
+  font-size: 0.8em;
+}
+
+.error-icon {
+  flex-shrink: 0;
+}
+
+.error-message {
+  flex: 1;
+}
+
+.error-close {
+  background: none;
+  border: none;
+  color: #721c24;
+  cursor: pointer;
+  font-size: 1.2em;
+  font-weight: bold;
+  padding: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.error-close:hover {
+  opacity: 0.7;
+}
+
+/* Dark theme support */
+@media (prefers-color-scheme: dark) {
+  .file-download {
+    background-color: #2d2d2d;
+    border-color: #555;
+  }
+  
+  .file-download.compact {
+    background-color: #3a3a3a;
+  }
+  
+  .file-name {
+    color: #fff;
+  }
+  
+  .file-size, .file-date, .progress-text {
+    color: #ccc;
+  }
+  
+  .progress-bar {
+    background-color: #4a4a4a;
+  }
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  .file-download {
+    max-width: 100%;
+    margin: 4px 0;
+  }
+  
+  .file-preview {
+    gap: 12px;
+  }
+  
+  .file-icon-large {
+    font-size: 36px;
+  }
+  
+  .download-btn {
+    padding: 12px 16px;
+    font-size: 1em;
+  }
+  
+  .file-download.compact {
+    padding: 10px;
+    gap: 10px;
+  }
+}
+
+/* Animation for download completion */
+@keyframes downloadComplete {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.download-btn.completed {
+  animation: downloadComplete 0.5s ease;
+  background-color: #28a745;
+}

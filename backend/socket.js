@@ -61,6 +61,60 @@ exports.init = (server, corsOptions) => {
       socket.broadcast.to(conversationId).emit("newMessage", msg);
     });
 
+    // File sharing events
+    socket.on("file:uploaded", (data) => {
+      const { conversationId, receiverId, fileMetadata } = data;
+      
+      // Normalize conversation ID
+      let normalizedConversationId = conversationId;
+      if (conversationId && conversationId.startsWith('sample-')) {
+        normalizedConversationId = conversationId.replace('sample-', '');
+      }
+      
+      console.log(`File uploaded notification from ${socket.id} to room ${normalizedConversationId}`);
+      
+      // Broadcast file notification to other participants in the conversation
+      socket.broadcast.to(normalizedConversationId).emit("file:received", {
+        senderId: socketUser,
+        fileMetadata,
+        conversationId: normalizedConversationId,
+        timestamp: new Date().toISOString()
+      });
+    });
+
+    socket.on("file:download:start", (data) => {
+      const { fileId, senderId } = data;
+      
+      console.log(`File download started: ${fileId} by ${socketUser}`);
+      
+      // Optionally notify the sender that their file is being downloaded
+      if (senderId && senderId !== socketUser) {
+        io.emit("file:download:notification", {
+          fileId,
+          downloaderId: socketUser,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+
+    // Handle file sharing status updates
+    socket.on("file:status:update", (data) => {
+      const { fileId, status, conversationId } = data;
+      
+      let normalizedConversationId = conversationId;
+      if (conversationId && conversationId.startsWith('sample-')) {
+        normalizedConversationId = conversationId.replace('sample-', '');
+      }
+      
+      // Broadcast status update to conversation participants
+      socket.broadcast.to(normalizedConversationId).emit("file:status:changed", {
+        fileId,
+        status,
+        userId: socketUser,
+        timestamp: new Date().toISOString()
+      });
+    });
+
     socket.on("disconnect", () => {
       console.log("Client disconnected:", socket.id);
       // Clean up our tracking

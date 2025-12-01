@@ -1,0 +1,182 @@
+/* FileMessage.css */
+.file-message {
+  display: flex;
+  flex-direction: column;
+  max-width: 70%;
+  margin: 8px 0;
+  position: relative;
+  font-family: inherit;
+}
+
+.file-message.sent {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.file-message.received {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.message-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 0.8em;
+}
+
+.file-message.sent .message-header {
+  justify-content: flex-end;
+}
+
+.file-message.received .message-header {
+  justify-content: flex-start;
+}
+
+.sender-name {
+  font-weight: 600;
+  color: #007bff;
+}
+
+.message-timestamp {
+  color: #666;
+  font-size: 0.9em;
+}
+
+.message-content {
+  background-color: #f8f9fa;
+  border-radius: 12px;
+  padding: 4px;
+  border: 1px solid #e9ecef;
+  min-width: 250px;
+  max-width: 100%;
+}
+
+.file-message.sent .message-content {
+  background-color: #007bff;
+  color: white;
+  border-color: #0056b3;
+}
+
+.file-message.sent .message-content .file-download.compact {
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.file-message.sent .message-content .file-name {
+  color: white;
+}
+
+.file-message.sent .message-content .file-size {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.file-message.sent .message-content .download-btn.compact {
+  background-color: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.file-message.sent .message-content .download-btn.compact:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.message-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 2px;
+  font-size: 0.8em;
+  min-height: 16px;
+}
+
+.sent-indicator {
+  color: #28a745;
+  font-size: 0.9em;
+}
+
+/* Message bubble styling */
+.file-message.received .message-content {
+  border-radius: 12px 12px 12px 4px;
+}
+
+.file-message.sent .message-content {
+  border-radius: 12px 12px 4px 12px;
+}
+
+/* Hover effects */
+.file-message:hover .message-timestamp {
+  opacity: 1;
+}
+
+.message-timestamp {
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+/* Dark theme support */
+@media (prefers-color-scheme: dark) {
+  .file-message .message-content {
+    background-color: #3a3a3a;
+    border-color: #555;
+  }
+  
+  .message-timestamp {
+    color: #ccc;
+  }
+  
+  .sender-name {
+    color: #4dabf7;
+  }
+  
+  .file-message.sent .message-content {
+    background-color: #0056b3;
+    border-color: #004085;
+  }
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  .file-message {
+    max-width: 85%;
+  }
+  
+  .message-content {
+    min-width: 200px;
+  }
+  
+  .message-header {
+    font-size: 0.75em;
+  }
+}
+
+/* Animation for new messages */
+@keyframes messageSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.file-message.new-message {
+  animation: messageSlideIn 0.3s ease-out;
+}
+
+/* Status indicators */
+.file-message.sent .sent-indicator {
+  transition: color 0.2s ease;
+}
+
+.file-message.sent.delivered .sent-indicator {
+  color: #007bff;
+}
+
+.file-message.sent.read .sent-indicator::after {
+  content: '✓';
+  margin-left: 2px;
+}
