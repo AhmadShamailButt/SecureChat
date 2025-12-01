@@ -19,6 +19,11 @@ const messageSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  type: {
+    type: String,
+    enum: ['text', 'file'],
+    default: 'text'
+  },
   encryptedData: {
     type: String, // Encrypted message ciphertext (base64)
     default: ''
@@ -46,6 +51,39 @@ const messageSchema = new mongoose.Schema({
   forwardedFrom: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
+    required: false
+  },
+  // File message properties
+  fileId: {
+    type: String,
+    required: false
+  },
+  fileName: {
+    type: String,
+    required: false
+  },
+  fileSize: {
+    type: Number,
+    required: false
+  },
+  fileType: {
+    type: String,
+    required: false
+  },
+  fileUrl: {
+    type: String,
+    required: false
+  },
+  fileHash: {
+    type: String,
+    required: false
+  },
+  encryptionKey: {
+    type: [Number], // Array of bytes for the file encryption key
+    required: false
+  },
+  encryptionIv: {
+    type: [Number], // Array of bytes for the file encryption IV
     required: false
   }
 });

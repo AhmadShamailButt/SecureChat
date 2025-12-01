@@ -3,6 +3,7 @@
 const express = require("express");
 const router = express.Router();
 const groupController = require("../controllers/groupController");
+const groupMessageController = require("../controllers/groupMessageController");
 const authMiddleware = require("../middleware/authMiddleware");
 
 // Apply auth middleware to all routes
@@ -31,6 +32,17 @@ router.post("/requests/:requestId/accept", groupController.acceptGroupRequest);
 
 // Reject a group request
 router.post("/requests/:requestId/reject", groupController.rejectGroupRequest);
+
+// Group Messages Routes
+router.post("/:groupId/messages", groupMessageController.sendGroupMessage);
+router.get("/:groupId/messages", groupMessageController.getGroupMessages);
+
+// Group Key Management Routes
+router.post("/:groupId/keys", groupMessageController.storeGroupKey);
+router.get("/:groupId/keys/:userId", groupMessageController.getGroupKey);
+
+// Read Receipts
+router.post("/:groupId/messages/:messageId/read", groupMessageController.markMessageAsRead);
 
 module.exports = router;
 

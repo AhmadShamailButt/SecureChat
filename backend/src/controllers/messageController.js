@@ -147,6 +147,19 @@ exports.getMessages = async (req, res) => {
         
         // Content
         text: msg.text,
+        type: msg.type || 'text',
+        
+        // File Fields (if applicable)
+        ...(msg.type === 'file' && {
+          fileId: msg.fileId,
+          fileName: msg.fileName,
+          fileSize: msg.fileSize,
+          fileType: msg.fileType,
+          fileUrl: msg.fileUrl,
+          fileHash: msg.fileHash,
+          encryptionKey: msg.encryptionKey,
+          encryptionIv: msg.encryptionIv
+        }),
         
         // Encryption Fields (CRITICAL from File 1)
         encryptedData: msg.encryptedData || '',
@@ -174,8 +187,25 @@ exports.getMessages = async (req, res) => {
  */
 exports.postMessage = async (req, res) => {
   try {
-    // Extract ALL fields including encryption fields (CRITICAL from File 1)
-    let { conversationId, text, encryptedData, iv, authTag, isEncrypted } = req.body;
+    // Extract ALL fields including encryption fields and file data
+    let { 
+      conversationId, 
+      text, 
+      encryptedData, 
+      iv, 
+      authTag, 
+      isEncrypted,
+      // File message properties
+      type,
+      fileId,
+      fileName,
+      fileSize,
+      fileType,
+      fileUrl,
+      fileHash,
+      encryptionKey,
+      encryptionIv
+    } = req.body;
 
     // Handle conversation IDs with "sample-" prefix
     if (conversationId.startsWith('sample-')) {
@@ -230,13 +260,14 @@ exports.postMessage = async (req, res) => {
       }
     }
 
-    // Create new message WITH encryption fields (CRITICAL from File 1)
+    // Create new message WITH encryption fields and file data
     const messageData = {
       conversationId: conversation._id.toString(),
       senderId: currentUserId,
       receiverId,
       text,
-      timestamp: new Date()
+      timestamp: new Date(),
+      type: type || 'text'
     };
 
     // Add encryption fields if message is encrypted
@@ -249,6 +280,20 @@ exports.postMessage = async (req, res) => {
       messageData.isEncrypted = false;
     }
 
+    // Add file properties if it's a file message
+    if (type === 'file') {
+      messageData.fileId = fileId;
+      messageData.fileName = fileName;
+      messageData.fileSize = fileSize;
+      messageData.fileType = fileType;
+      messageData.fileUrl = fileUrl;
+      messageData.fileHash = fileHash;
+      messageData.encryptionKey = encryptionKey;
+      messageData.encryptionIv = encryptionIv;
+      // For file messages, use filename as the last message text
+      messageData.text = `📎 ${fileName}`;
+    }
+
     const newMessage = new Message(messageData);
     await newMessage.save();
 
@@ -257,7 +302,7 @@ exports.postMessage = async (req, res) => {
     const senderName = newMessage.senderId.fullName || 'Unknown';
 
     // Update conversation's last message
-    conversation.lastMessage = text;
+    conversation.lastMessage = type === 'file' ? `📎 ${fileName}` : text;
     conversation.lastMessageTimestamp = new Date();
     await conversation.save();
 
@@ -266,15 +311,28 @@ exports.postMessage = async (req, res) => {
       id: newMessage._id.toString(),
       conversationId: conversation._id.toString(),
       senderId: 'me',
-      senderName: senderName, // File 2
-      receiverId: newMessage.receiverId.toString(), // CRITICAL from File 1
+      senderName: senderName,
+      receiverId: newMessage.receiverId.toString(),
       text: newMessage.text,
+      type: newMessage.type || 'text',
       
-      // Encryption Fields (CRITICAL from File 1)
+      // Encryption Fields
       encryptedData: newMessage.encryptedData || '',
       iv: newMessage.iv || '',
       authTag: newMessage.authTag || '',
       isEncrypted: newMessage.isEncrypted || false,
+      
+      // File Fields (if applicable)
+      ...(newMessage.type === 'file' && {
+        fileId: newMessage.fileId,
+        fileName: newMessage.fileName,
+        fileSize: newMessage.fileSize,
+        fileType: newMessage.fileType,
+        fileUrl: newMessage.fileUrl,
+        fileHash: newMessage.fileHash,
+        encryptionKey: newMessage.encryptionKey,
+        encryptionIv: newMessage.encryptionIv
+      }),
       
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       fullTimestamp: newMessage.timestamp.toISOString ? newMessage.timestamp.toISOString() : new Date(newMessage.timestamp).toISOString(),

@@ -280,6 +280,55 @@ export const rejectGroupRequest = createAsyncThunk(
   }
 );
 
+// ==================== Group Messaging ====================
+
+// Fetch group messages
+export const fetchGroupMessages = createAsyncThunk(
+  "chat/fetchGroupMessages",
+  async ({ groupId, limit = 50, before = null }, thunkAPI) => {
+    try {
+      const params = { limit };
+      if (before) params.before = before;
+
+      const response = await axiosInstance.get(`/groups/${groupId}/messages`, { params });
+      return { groupId, messages: response.data };
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || error.message;
+      toast.error(message);
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Send group message
+export const sendGroupMessage = createAsyncThunk(
+  "chat/sendGroupMessage",
+  async ({ groupId, messageData }, thunkAPI) => {
+    try {
+      const response = await axiosInstance.post(`/groups/${groupId}/messages`, messageData);
+      return { groupId, message: response.data.groupMessage };
+    } catch (error) {
+      const message = error.response?.data?.error || error.response?.data?.message || error.message;
+      toast.error(message);
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
+
+// Mark group message as read
+export const markGroupMessageAsRead = createAsyncThunk(
+  "chat/markGroupMessageAsRead",
+  async ({ groupId, messageId }, thunkAPI) => {
+    try {
+      await axiosInstance.post(`/groups/${groupId}/messages/${messageId}/read`);
+      return { groupId, messageId };
+    } catch (error) {
+      // Don't show error toast for read receipts
+      return thunkAPI.rejectWithValue(error.response?.data?.error || error.message);
+    }
+  }
+);
+
 // Add a user to your friends list (backward compatibility - now sends a request)
 export const addNewContact = createAsyncThunk(
   "chat/addNewContact",
@@ -301,6 +350,7 @@ const chatSlice = createSlice({
   initialState: {
     contacts: [],
     messages: [],
+    groupMessages: {}, // { groupId: [messages] }
     searchResults: [], // Store global search results here
     friendRequests: {
       received: [], // Friend requests received from others
@@ -315,6 +365,7 @@ const chatSlice = createSlice({
     selectedGroup: null,
     isContactsLoading: false,
     isMessagesLoading: false,
+    isGroupMessagesLoading: false,
     isSearching: false, // UI loading state for search
     isFriendRequestsLoading: false,
     isGroupsLoading: false,
@@ -335,6 +386,21 @@ const chatSlice = createSlice({
     },
     addMessage: (state, action) => {
       state.messages.push(action.payload);
+    },
+    addGroupMessage: (state, action) => {
+      const { groupId, message } = action.payload;
+      if (!state.groupMessages[groupId]) {
+        state.groupMessages[groupId] = [];
+      }
+      state.groupMessages[groupId].push(message);
+    },
+    clearGroupMessages: (state, action) => {
+      const groupId = action.payload;
+      if (groupId) {
+        state.groupMessages[groupId] = [];
+      } else {
+        state.groupMessages = {};
+      }
     },
     // Clear search results when closing the search view
     clearSearchResults: (state) => {
@@ -645,9 +711,31 @@ const chatSlice = createSlice({
           }
         });
       }
+    })
+    // fetchGroupMessages
+    .addCase(fetchGroupMessages.pending, (state) => {
+      state.isGroupMessagesLoading = true;
+      state.error = null;
+    })
+    .addCase(fetchGroupMessages.fulfilled, (state, action) => {
+      state.isGroupMessagesLoading = false;
+      const { groupId, messages } = action.payload;
+      state.groupMessages[groupId] = messages || [];
+    })
+    .addCase(fetchGroupMessages.rejected, (state, action) => {
+      state.isGroupMessagesLoading = false;
+      state.error = action.payload;
+    })
+    // sendGroupMessage
+    .addCase(sendGroupMessage.fulfilled, (state, action) => {
+      const { groupId, message } = action.payload;
+      if (!state.groupMessages[groupId]) {
+        state.groupMessages[groupId] = [];
+      }
+      state.groupMessages[groupId].push(message);
     });
   },
 });
 
-export const { setSelectedContact, setSelectedGroup, clearChatState, addMessage, clearSearchResults, updateMessage, markMessageFailed, clearMessages, markMessageAsRead, markMessagesAsReadBatch, updateContactStatus } = chatSlice.actions;
+export const { setSelectedContact, setSelectedGroup, clearChatState, addMessage, addGroupMessage, clearGroupMessages, clearSearchResults, updateMessage, markMessageFailed, clearMessages, markMessageAsRead, markMessagesAsReadBatch, updateContactStatus } = chatSlice.actions;
 export default chatSlice.reducer;

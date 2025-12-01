@@ -6,6 +6,7 @@ import { createGroup, fetchGroups } from '../../store/slices/chatSlice';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/Dialog';
 import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
+import { initializeGroupEncryption } from '../../utils/groupEncryption';
 
 export default function CreateGroupDialog({ open, onOpenChange, onGroupCreated }) {
   const [groupName, setGroupName] = useState('');
@@ -14,6 +15,7 @@ export default function CreateGroupDialog({ open, onOpenChange, onGroupCreated }
   const [isCreating, setIsCreating] = useState(false);
   const dispatch = useDispatch();
   const { contacts } = useSelector((state) => state.chat);
+  const { userDetails: user } = useSelector((state) => state.user);
 
   const handleToggleFriend = (friendId) => {
     setSelectedFriends(prev => 
@@ -31,16 +33,53 @@ export default function CreateGroupDialog({ open, onOpenChange, onGroupCreated }
 
     setIsCreating(true);
     try {
-      await dispatch(createGroup({
+      // Create the group
+      const result = await dispatch(createGroup({
         name: groupName.trim(),
         description: description.trim(),
         memberIds: selectedFriends
       }));
+
+      // Check if group creation was successful
+      if (result.meta.requestStatus === 'fulfilled' && result.payload?.group) {
+        const newGroup = result.payload.group;
+
+        console.log('[CREATE GROUP] Group created:', newGroup);
+        console.log('[CREATE GROUP] Members:', newGroup.members);
+        console.log('[CREATE GROUP] Creator ID:', user.id || user._id);
+
+        // Initialize encryption for the group
+        toast.loading('Setting up encryption...', { id: 'group-encryption' });
+        try {
+          // Ensure we have all the members including the creator
+          const allMembers = newGroup.members || [];
+
+          console.log('[CREATE GROUP] Initializing encryption for members:', allMembers.map(m => m.id || m._id));
+
+          await initializeGroupEncryption(
+            newGroup.id,
+            allMembers,
+            user.id || user._id
+          );
+          toast.success('Group created with encryption!', { id: 'group-encryption' });
+        } catch (encryptError) {
+          console.error('[CREATE GROUP] Failed to initialize group encryption:', encryptError);
+          console.error('[CREATE GROUP] Error details:', {
+            message: encryptError.message,
+            stack: encryptError.stack,
+            groupId: newGroup.id,
+            memberCount: newGroup.members?.length
+          });
+          toast.error('Group created but encryption setup failed', { id: 'group-encryption' });
+        }
+      }
+
       await dispatch(fetchGroups());
       setGroupName('');
       setDescription('');
       setSelectedFriends([]);
       onOpenChange(false);
+
       // Callback to switch to groups tab after creation
       if (onGroupCreated) {
         onGroupCreated();

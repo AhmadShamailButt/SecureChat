@@ -5,6 +5,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { searchGlobalUsers, addGroupMember, sendGroupRequest, getGroupRequests } from '../../store/slices/chatSlice';
 import { toast } from 'react-hot-toast';
 import AddFriendDialog from './AddFriendDialog';
+import { addMemberEncryptionKey } from '../../utils/groupEncryption';
 
 export default function GroupsList({ groups, activeGroupId, setActiveGroupId }) {
   const dispatch = useDispatch();
@@ -49,6 +50,21 @@ export default function GroupsList({ groups, activeGroupId, setActiveGroupId }) 
 
     // Successfully added friend to group
     if (addMemberResult.meta.requestStatus === 'fulfilled') {
+      // Distribute encryption key to new member
+      toast.loading('Setting up encryption for new member...', { id: 'member-encryption' });
+      try {
+        await addMemberEncryptionKey(
+          selectedGroup.id,
+          targetUserId,
+          currentUserId,
+          selectedGroup.createdBy.id
+        );
+        toast.success('Member added with encryption!', { id: 'member-encryption' });
+      } catch (encryptError) {
+        console.error('Failed to add member encryption key:', encryptError);
+        toast.error('Member added but encryption setup failed', { id: 'member-encryption' });
+      }
+
       dispatch(getGroupRequests());
       setIsAddMemberDialogOpen(false);
       setSelectedGroup(null);

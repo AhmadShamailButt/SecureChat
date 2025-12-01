@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Send, X } from "lucide-react";
+import { Send, X, Paperclip } from "lucide-react";
 import { cn } from "../../lib/utils";
 import ChatHeader from "./ChatHeader";
 import MessageList from "./MessageList";
+import FileUpload from "../FileUpload/FileUpload";
 
 export default function ChatArea({
   activeContact,
@@ -16,9 +17,11 @@ export default function ChatArea({
   onForwardMessage,
   currentUserName,
   isGroupChat = false,
+  conversationId,
 }) {
   const [messageText, setMessageText] = useState("");
   const [replyingTo, setReplyingTo] = useState(null);
+  const [showFileUpload, setShowFileUpload] = useState(false);
   const inputRef = useRef(null);
 
   const onSubmit = (e) => {
@@ -37,12 +40,60 @@ export default function ChatArea({
     // User can manually click the input if needed
   };
 
+  const handleFileUpload = async (fileData) => {
+    try {
+      // Create file message directly via API instead of using handleSend
+      const token = sessionStorage.getItem('token');
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      
+      const messageData = {
+        conversationId: conversationId,
+        type: 'file',
+        text: `📎 ${fileData.fileName}`,
+        fileName: fileData.fileName,
+        fileSize: fileData.fileSize,
+        fileType: fileData.fileType,
+        fileUrl: fileData.fileUrl,
+        fileId: fileData.fileId,
+        fileHash: fileData.fileHash,
+        encryptionKey: fileData.encryptionKey,
+        encryptionIv: fileData.encryptionIv
+      };
+
+      // Send file message directly to the API
+      console.log('Sending file message:', messageData);
+      const response = await fetch(`${apiUrl}/api/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(messageData)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Failed to send file message:', errorData);
+        throw new Error('Failed to send file message');
+      }
+
+      const responseData = await response.json();
+      console.log('File message sent successfully:', responseData);
+
+      setReplyingTo(null);
+      setShowFileUpload(false);
+    } catch (error) {
+      console.error('Error sending file message:', error);
+      // You might want to show an error toast here
+    }
+  };
+
   const canSendMessage = isConnected && isFriend;
 
   return (
     <div className="flex-1 flex flex-col">
       {/* Chat header */}
-      <ChatHeader activeContact={activeContact} />
+      <ChatHeader activeContact={activeContact} isGroupChat={isGroupChat} />
 
       {/* Message list */}
       <div className="flex-1 p-4 overflow-y-auto bg-background" style={{ overflowX: 'visible' }}>
@@ -99,6 +150,20 @@ export default function ChatArea({
               </div>
             )}
             <form onSubmit={onSubmit} className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowFileUpload(!showFileUpload)}
+                className={cn(
+                  "p-2 rounded-md transition-colors flex-shrink-0",
+                  canSendMessage
+                    ? "bg-secondary hover:bg-secondary/80 text-secondary-foreground"
+                    : "bg-muted text-muted-foreground cursor-not-allowed"
+                )}
+                disabled={!canSendMessage}
+                title="Attach file"
+              >
+                <Paperclip className="h-5 w-5" />
+              </button>
               <input
                 ref={inputRef}
                 type="text"
@@ -112,7 +177,7 @@ export default function ChatArea({
               <button
                 type="submit"
                 className={cn(
-                  "p-2 rounded-md transition-colors",
+                  "p-2 rounded-md transition-colors flex-shrink-0",
                   canSendMessage
                     ? "bg-primary hover:bg-primary/90 text-primary-foreground"
                     : "bg-muted text-muted-foreground cursor-not-allowed"
@@ -129,6 +194,18 @@ export default function ChatArea({
             )}
             {connectError && (
               <p className="mt-1 text-xs text-destructive">Error: {connectError}</p>
+            )}
+            
+            {/* File Upload Component */}
+            {showFileUpload && (
+              <div className="mt-4 p-4 border border-border rounded-md bg-card">
+                <FileUpload
+                  recipientId={activeContact?.userId || activeContact?._id || activeContact?.id}
+                  onUploadComplete={handleFileUpload}
+                  onCancel={() => setShowFileUpload(false)}
+                  conversationId={conversationId}
+                />
+              </div>
             )}
           </>
         )}

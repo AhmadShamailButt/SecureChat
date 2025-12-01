@@ -5,11 +5,15 @@ import { cn } from '../../lib/utils';
 import { toast } from 'react-hot-toast';
 import ForwardMessageDialog from './ForwardMessageDialog';
 import MessageDropdown from './MessageDropdown';
+import FileMessage from '../FileMessage/FileMessage';
 
 export default function MessageList({ messages = [], loading = false, currentUserId, onReply, activeContact, currentUserName, isGroupChat = false }) {
   const [forwardDialogOpen, setForwardDialogOpen] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(null); // Store message ID for which dropdown is open
+
+  // Debug: Log messages to see if file messages are included
+  console.log('MessageList received messages:', messages);
 
   const handleForwardClick = (message) => {
     setSelectedMessage(message);
@@ -341,34 +345,44 @@ function MessageBubble({ message, messages, currentUserId, activeContact, curren
           </div>
         )}
         
-        {/* Actual message text */}
+        {/* Message content - either text or file */}
         <div className="flex items-end justify-between gap-2">
-          <p className={cn(
-            "flex-1 text-sm leading-relaxed",
-            isMine ? "text-primary-foreground" : "text-foreground"
-          )}>
-            {(() => {
-              // Handle forwarded messages - extract the actual message text
-              if (message.text && message.text.startsWith('Forwarded from ')) {
-                // Format: "Forwarded from {name}: {text}"
-                const match = message.text.match(/^Forwarded from (.+?): (.+)$/);
-                if (match) {
-                  return match[2]; // Return just the actual message text
-                }
-              }
-              
-              // Handle reply messages
-              if (message.replyingTo) {
-                return message.text;
-              }
-              if (message.text && message.text.startsWith('Replying to:')) {
-                const lines = message.text.split('\n');
-                return lines.slice(1).join('\n') || lines[0].replace('Replying to: ', '');
-              }
-              
-              return message.text;
-            })()}
-          </p>
+          <div className="flex-1">
+            {message.type === 'file' ? (
+              <FileMessage 
+                message={message}
+                isOwn={isMine}
+                sharedSecret={message.sharedSecret || 'default-secret'}
+              />
+            ) : (
+              <p className={cn(
+                "text-sm leading-relaxed",
+                isMine ? "text-primary-foreground" : "text-foreground"
+              )}>
+                {(() => {
+                  // Handle forwarded messages - extract the actual message text
+                  if (message.text && message.text.startsWith('Forwarded from ')) {
+                    // Format: "Forwarded from {name}: {text}"
+                    const match = message.text.match(/^Forwarded from (.+?): (.+)$/);
+                    if (match) {
+                      return match[2]; // Return just the actual message text
+                    }
+                  }
+                  
+                  // Handle reply messages
+                  if (message.replyingTo) {
+                    return message.text;
+                  }
+                  if (message.text && message.text.startsWith('Replying to:')) {
+                    const lines = message.text.split('\n');
+                    return lines.slice(1).join('\n') || lines[0].replace('Replying to: ', '');
+                  }
+                  
+                  return message.text;
+                })()}
+              </p>
+            )}
+          </div>
           
           {/* Timestamp and status - positioned at bottom right */}
           <div className={cn(
@@ -423,6 +437,7 @@ MessageList.propTypes = {
     PropTypes.shape({
       id: PropTypes.string,
       text: PropTypes.string,
+      type: PropTypes.string,
       senderId: PropTypes.string,
       timestamp: PropTypes.string,
       fullTimestamp: PropTypes.string,
@@ -430,6 +445,16 @@ MessageList.propTypes = {
       failed: PropTypes.bool,
       read: PropTypes.oneOfType([PropTypes.bool, PropTypes.string, PropTypes.number]),
       replyingTo: PropTypes.object,
+      // File message properties
+      fileData: PropTypes.object,
+      fileName: PropTypes.string,
+      fileSize: PropTypes.number,
+      fileType: PropTypes.string,
+      fileUrl: PropTypes.string,
+      fileId: PropTypes.string,
+      encryptionKey: PropTypes.array,
+      encryptionIv: PropTypes.array,
+      fileHash: PropTypes.string,
     })
   ),
   loading: PropTypes.bool,

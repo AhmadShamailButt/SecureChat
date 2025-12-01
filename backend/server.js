@@ -1,7 +1,9 @@
+const dotenv = require("dotenv");
+dotenv.config();
+
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
-const dotenv = require("dotenv");
 const http = require("http");
 const connectDB = require("./src/config/database");
 const { init: initSocket } = require("./src/config/socket");
@@ -14,8 +16,7 @@ const groupRoutes = require("./src/routes/groupRoutes");
 // Added line 14:
 const userRoutes = require("./src/routes/userRoutes");
 const callRoutes = require("./src/routes/callRoutes");
-
-dotenv.config();
+const fileRoutes = require("./src/routes/fileRoutes");
 connectDB();
 
 const app = express();
@@ -62,6 +63,7 @@ app.use("/api/friends", friendRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/groups", groupRoutes);
 app.use("/api/calls", callRoutes);
+app.use("/api/files", fileRoutes);
 
 app.get("/", (req, res) => {
   res.send("SecureChat API is running");

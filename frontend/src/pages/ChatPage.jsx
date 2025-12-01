@@ -27,6 +27,7 @@ import {
   fetchCallHistory
 } from '../store/slices/voiceCallSlice';
 import useVoiceCall from '../hooks/useVoiceCall';
+import useGroupMessages from '../hooks/useGroupMessages';
 import { Button } from '../components/ui/Button';
 import axiosInstance from '../store/axiosInstance';
 
@@ -101,6 +102,15 @@ export default function ChatPage() {
   const activeContact = selectedContact || contacts.find(c => c.id === activeId);
   const activeGroup = selectedGroup || groups.find(g => g.id === activeId);
 
+  // Initialize group messaging hook
+  const {
+    messages: groupMessagesData,
+    decryptedMessages: decryptedGroupMessages,
+    isLoading: isGroupMessagesLoading,
+    sendMessage: sendGroupMessage,
+    isJoinedGroup
+  } = useGroupMessages(socket, activeGroup, user, isCryptoInitialized);
+
   // Check URL params for group or contact ID
   useEffect(() => {
     if (params.id) {
@@ -110,6 +120,11 @@ export default function ChatPage() {
           setActiveId(params.id);
           dispatch(setSelectedGroup(group));
           dispatch(setSelectedContact(null));
+          // Only set view=groups if no view is explicitly set (allow user to switch tabs)
+          const currentView = searchParams.get('view');
+          if (!currentView) {
+            setSearchParams({ view: 'groups' }, { replace: true });
+          }
         }
       } else {
         const contact = contacts.find(c => c.id === params.id);
@@ -117,6 +132,11 @@ export default function ChatPage() {
           setActiveId(params.id);
           dispatch(setSelectedContact(contact));
           dispatch(setSelectedGroup(null));
+          // Only set view=messages if no view is explicitly set (allow user to switch tabs)
+          const currentView = searchParams.get('view');
+          if (!currentView) {
+            setSearchParams({ view: 'messages' }, { replace: true });
+          }
         }
       }
     } else if (location.state?.activeConversation) {
@@ -152,7 +172,6 @@ export default function ChatPage() {
   }, [user, dispatch]);
 
   // Decrypt messages when they're loaded
-  // STRICTLY PRESERVED FROM SOURCE 1
   useEffect(() => {
     const decryptMessagesAsync = async () => {
       if (!messages || messages.length === 0 || !isCryptoInitialized || !user || !activeContact) {
@@ -186,6 +205,16 @@ export default function ChatPage() {
             console.warn(`Cannot decrypt message ${msg.id}: missing user ID`);
             newDecrypted[msg.id] = '[Cannot decrypt: Old message format]';
             continue;
+          }
+
+          // DEBUG: Log data structure to catch "Object" errors
+          if (typeof msg.encryptedData !== 'string') {
+              console.error(`❌ Data format error for msg ${msg.id}:`, {
+                  type: typeof msg.encryptedData,
+                  value: msg.encryptedData
+              });
+              newDecrypted[msg.id] = '[Error: Corrupted Data]';
+              continue;
           }
 
           console.log(`🔓 Decrypting message ${msg.id}:`, {
@@ -398,9 +427,15 @@ export default function ChatPage() {
         // Add message to state
         dispatch(addMessage(msg));
         
-        // Decrypt if encrypted - STRICTLY PRESERVED FROM SOURCE 1
+        // Decrypt if encrypted
         if (msg.isEncrypted && isCryptoInitialized) {
           try {
+            // Validate data type before decrypting
+            if (typeof msg.encryptedData !== 'string') {
+                console.error("❌ Incoming message data corrupt:", typeof msg.encryptedData);
+                throw new Error("Invalid format");
+            }
+
             // For incoming messages, decrypt with sender's ID
             console.log(`🔓 Decrypting incoming message from:`, msg.senderId);
             
@@ -652,7 +687,7 @@ export default function ChatPage() {
     e.preventDefault();
     if (!messageText.trim() || !activeId || !isConnected || activeGroup) return;
     
-    // Check encryption capability - STRICTLY PRESERVED FROM SOURCE 1
+    // Check encryption capability
     const canEncrypt = isCryptoInitialized && activeContact && activeContact.userId;
     
     console.log('🔐 Encryption check:', { 
@@ -662,7 +697,7 @@ export default function ChatPage() {
       canEncrypt
     });
 
-    // Optimistic UI Update (From Code 2)
+    // Optimistic UI Update
     const tempId = `temp-${Date.now()}`;
     const newMessage = {
       id: tempId,
@@ -686,7 +721,7 @@ export default function ChatPage() {
     try {
       let messagePayload;
       
-      // Encryption Logic - STRICTLY PRESERVED FROM SOURCE 1
+      // Encryption Logic
       if (canEncrypt) {
         try {
           console.log('🔒 Encrypting message for user:', activeContact.userId);
@@ -714,7 +749,7 @@ export default function ChatPage() {
           };
         }
       } else {
-        console.log('⚠️  Crypto not ready, sending unencrypted');
+        console.log('⚠️ Crypto not ready, sending unencrypted');
         messagePayload = {
           conversationId: activeId,
           text: messageText.trim(),
@@ -723,7 +758,7 @@ export default function ChatPage() {
         };
       }
 
-      // Handle Replying To Logic (From Code 2)
+      // Handle Replying To Logic
       if (replyingTo) {
         messagePayload.text = `Replying to: ${replyingTo.text}\n${messagePayload.text}`;
       }
@@ -737,7 +772,7 @@ export default function ChatPage() {
       if (response.meta.requestStatus === "fulfilled" && response.payload?.id) {
         setProcessedMessageIds(prev => new Set(prev).add(response.payload.id));
         
-        // If encrypted, cache the decrypted version (Preserved from Source 1 logic)
+        // If encrypted, cache the decrypted version
         if (messagePayload.isEncrypted) {
           setDecryptedMessages(prev => ({
             ...prev,
@@ -764,12 +799,11 @@ export default function ChatPage() {
       setActiveId(contactId);
       dispatch(setSelectedGroup(group));
       dispatch(setSelectedContact(null));
-      navigate(`/chat/group/${contactId}?view=messages`, { replace: true });
+      navigate(`/chat/group/${contactId}?view=groups`, { replace: true });
     } else if (contact) {
       setActiveId(contactId);
       dispatch(setSelectedContact(contact));
       dispatch(setSelectedGroup(null));
-      // Preserving Code 1's behavior to clear decrypted messages on switch
       setDecryptedMessages({});
       navigate(`/chat/${contactId}?view=messages`, { replace: true });
     }
@@ -824,25 +858,27 @@ export default function ChatPage() {
         />
 
         {activeGroup ? (
-          <div className="flex-1 flex flex-col items-center justify-center bg-background p-8">
-            <div className="text-center max-w-md">
-              <div className="h-20 w-20 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4">
-                <svg className="h-10 w-10 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-              </div>
-              <h2 className="text-2xl font-semibold text-foreground mb-2">{activeGroup.name}</h2>
-              {activeGroup.description && (
-                <p className="text-muted-foreground mb-4">{activeGroup.description}</p>
-              )}
-              <p className="text-sm text-muted-foreground mb-6">
-                {activeGroup.memberCount} {activeGroup.memberCount === 1 ? 'member' : 'members'}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Group messaging functionality coming soon...
-              </p>
-            </div>
-          </div>
+          <ChatArea
+            activeContact={activeGroup}
+            messages={groupMessagesData.map(msg => ({
+              ...msg,
+              text: msg.isEncrypted && decryptedGroupMessages[msg.id]
+                ? decryptedGroupMessages[msg.id]
+                : msg.text
+            }))}
+            loading={isGroupMessagesLoading}
+            isConnected={isConnected && isJoinedGroup}
+            connectError={connectError}
+            handleSend={async (e, text) => {
+              e.preventDefault();
+              await sendGroupMessage(text);
+            }}
+            currentUserId={user?.id}
+            isFriend={true}
+            onForwardMessage={handleForwardMessage}
+            currentUserName={user?.name || user?.fullName}
+            isGroupChat={true}
+          />
         ) : activeContact ? (
           <ChatArea
             activeContact={activeContact}
@@ -856,6 +892,7 @@ export default function ChatPage() {
             onForwardMessage={handleForwardMessage}
             currentUserName={user?.name || user?.fullName}
             isGroupChat={false}
+            conversationId={activeId}
           />
         ) : (
           <EmptyChatState currentUserId={user?.id} />

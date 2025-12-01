@@ -148,29 +148,10 @@ export const CryptoProvider = ({ children }) => {
     }
   }, []);
   
-  // Clear public key cache (all or for specific user)
-  const clearPublicKeyCache = useCallback((userId = null) => {
-    if (userId) {
-      delete publicKeyCache.current[userId];
-      console.log(`🗑️ Public key cache cleared for user: ${userId}`);
-    } else {
-      publicKeyCache.current = {};
-      console.log('🗑️ Public key cache cleared (all users)');
-    }
-  }, []);
-
-  // Clear shared key cache for a specific user
-  const clearSharedKeyCache = useCallback((userId) => {
-    if (userId) {
-      cryptoService.clearSharedKeyCache(userId);
-      console.log(`🗑️ Shared key cache cleared for user: ${userId}`);
-    }
-  }, []);
-
-  // Clear all shared key cache
-  const clearAllSharedKeyCache = useCallback(() => {
-    cryptoService.clearAllSharedKeyCache();
-    console.log('🗑️ All shared key cache cleared');
+  // Clear public key cache
+  const clearPublicKeyCache = useCallback(() => {
+    publicKeyCache.current = {};
+    console.log('🗑️ Public key cache cleared');
   }, []);
 
   const encryptMessage = useCallback(async (plaintext, recipientId) => {
@@ -207,31 +188,10 @@ export const CryptoProvider = ({ children }) => {
       const decrypted = await cryptoService.decryptFromUser(encryptedData, senderKey, senderId);
       return decrypted;
     } catch (err) {
-      // If OperationError (key mismatch), clear public key cache to force re-fetch
-      // This ensures we get the latest public key if it was updated
-      const isOperationError = err.name === 'OperationError' || 
-                               (err.message && (
-                                 err.message.includes('Wrong key') ||
-                                 err.message.includes('authentication failure') ||
-                                 err.message.includes('different key')
-                               ));
-      
-      if (isOperationError && senderId) {
-        console.warn(`⚠️ OperationError detected - clearing caches for user: ${senderId}`);
-        // Clear public key cache for this user to force fresh fetch on next attempt
-        clearPublicKeyCache(senderId);
-        // Also clear shared key cache (already done in cryptoService, but ensure it's cleared)
-        cryptoService.clearSharedKeyCache(senderId);
-      }
-      
-      // Suppress repeated decryption errors for better UX
-      // Only log if it's not a key mismatch (which is expected for old messages)
-      if (!err.message || !err.message.includes('key mismatch')) {
-        console.error('❌ Decryption failed:', err);
-      }
+      console.error('❌ Decryption failed:', err);
       throw err;
     }
-  }, [isInitialized, getUserPublicKey, initializeCrypto, clearPublicKeyCache]);
+  }, [isInitialized, getUserPublicKey, initializeCrypto]);
 
   // MODIFIED: Only clear in-memory keys, NOT localStorage
   const clearCrypto = useCallback(() => {
@@ -274,10 +234,7 @@ export const CryptoProvider = ({ children }) => {
       clearCrypto,        // Clears in-memory only, preserves localStorage
       deleteKeys,         // Permanently deletes keys (dangerous!)
       initializeCrypto,
-      clearPublicKeyCache,
-      clearSharedKeyCache,    // Clear shared key cache for specific user
-      clearAllSharedKeyCache, // Clear all shared key cache
-      getUserPublicKey    // Expose getUserPublicKey for voice calls
+      clearPublicKeyCache
     }}>
       {children}
     </CryptoContext.Provider>

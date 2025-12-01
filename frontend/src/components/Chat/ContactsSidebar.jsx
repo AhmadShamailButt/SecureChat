@@ -68,8 +68,8 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
 
   const selectGroup = (groupId) => {
     setActiveId(groupId);
-    // Always navigate to chat route when selecting a group
-    navigate(`/chat/group/${groupId}?view=messages`, { replace: true });
+    // Always navigate to chat route when selecting a group, and keep view=groups
+    navigate(`/chat/group/${groupId}?view=groups`, { replace: true });
   };
 
   const handleRefreshMessages = () => {
@@ -196,7 +196,8 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
         <div className="flex gap-1 mb-3 border-b border-border">
           <button
             onClick={() => {
-              setSearchParams({ view: 'messages' }, { replace: true });
+              // Navigate to chat page with messages view, clearing any active group
+              navigate('/chat?view=messages', { replace: true });
             }}
             className={cn(
               "flex-1 py-2 px-2 text-xs font-medium transition-colors relative",
@@ -241,7 +242,8 @@ export default function ContactsSidebar({ contacts, activeId, setActiveId, isCol
           </button>
           <button
             onClick={() => {
-              setSearchParams({ view: 'groups' }, { replace: true });
+              // Navigate to chat page with groups view, clearing any active contact/group
+              navigate('/chat?view=groups', { replace: true });
               dispatch(fetchGroups());
             }}
             className={cn(
