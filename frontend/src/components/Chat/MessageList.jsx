@@ -385,9 +385,9 @@ function MessageBubble({ message, messages, currentUserId, activeContact, curren
                   const isRead = message.read === true || message.read === 'true' || message.read === 1;
                  
                   return isRead ? (
-                    <CheckCheck className="h-3.5 w-3.5" style={{ color: '#3b82f6', display: 'inline-block', flexShrink: 0 }} />
+                    <CheckCheck className="h-3.5 w-3.5 text-primary-foreground/90" style={{ display: 'inline-block', flexShrink: 0 }} />
                   ) : (
-                    <Check className="h-3.5 w-3.5" style={{ display: 'inline-block', flexShrink: 0 }} />
+                    <Check className="h-3.5 w-3.5 text-primary-foreground/70" style={{ display: 'inline-block', flexShrink: 0 }} />
                   );
                 })()}
               </span>
