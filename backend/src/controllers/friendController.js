@@ -7,6 +7,7 @@ const Message = require("../models/Message");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const { isConnected } = require("../config/database");
+const { isUserOnline } = require("../config/socket");
 
 /**
  * Helper to get current User ID from token
@@ -79,13 +80,18 @@ exports.getFriends = async (req, res) => {
           read: false
         });
 
+        // Verify online status against active socket connections
+        // This ensures accuracy even if database is slightly out of sync
+        const hasActiveSockets = isUserOnline(friend._id.toString());
+        const actualOnlineStatus = hasActiveSockets !== null ? hasActiveSockets : (friend.isOnline || false);
+        
         allFriends.push({
           id: conversation._id.toString(),
           userId: friend._id.toString(),
           name: friend.fullName,
           email: friend.email,
           department: friend.department,
-          isOnline: friend.isOnline || false,
+          isOnline: actualOnlineStatus,
           lastMessage: conversation.lastMessage || "",
           lastSeen: friend.lastSeen || null,
           unreadCount
@@ -124,13 +130,18 @@ exports.getFriends = async (req, res) => {
           read: false
         });
 
+        // Verify online status against active socket connections
+        // This ensures accuracy even if database is slightly out of sync
+        const hasActiveSockets = isUserOnline(friend._id.toString());
+        const actualOnlineStatus = hasActiveSockets !== null ? hasActiveSockets : (friend.isOnline || false);
+        
         allFriends.push({
           id: conversation._id.toString(),
           userId: friend._id.toString(),
           name: friend.fullName,
           email: friend.email,
           department: friend.department,
-          isOnline: friend.isOnline || false,
+          isOnline: actualOnlineStatus,
           lastMessage: conversation.lastMessage || "",
           lastSeen: friend.lastSeen || null,
           unreadCount
@@ -293,13 +304,17 @@ exports.acceptFriendRequest = async (req, res) => {
     }
 
     // Return contact object
+    // Verify online status against active socket connections
+    const hasActiveSockets = isUserOnline(sender._id.toString());
+    const actualOnlineStatus = hasActiveSockets !== null ? hasActiveSockets : (sender.isOnline || false);
+    
     const newContact = {
       id: conversation._id.toString(),
       userId: sender._id.toString(),
       name: sender.fullName,
       email: sender.email,
       department: sender.department,
-      isOnline: sender.isOnline || false,
+      isOnline: actualOnlineStatus,
       lastMessage: conversation.lastMessage || "",
       lastSeen: conversation.lastMessageTimestamp 
         ? conversation.lastMessageTimestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) 
@@ -371,32 +386,44 @@ exports.getFriendRequests = async (req, res) => {
     }).populate("friendId", "fullName email gender department isOnline profilePicture");
 
     // Format received requests
-    const received = receivedRequests.map(req => ({
-      id: req._id.toString(),
-      requestId: req._id.toString(),
-      userId: req.userId._id.toString(),
-      name: req.userId.fullName,
-      email: req.userId.email,
-      department: req.userId.department,
-      isOnline: req.userId.isOnline || false,
-      profilePicture: req.userId.profilePicture || "",
-      createdAt: req.createdAt,
-      type: "received"
-    }));
+    const received = receivedRequests.map(req => {
+      // Verify online status against active socket connections
+      const hasActiveSockets = isUserOnline(req.userId._id.toString());
+      const actualOnlineStatus = hasActiveSockets !== null ? hasActiveSockets : (req.userId.isOnline || false);
+      
+      return {
+        id: req._id.toString(),
+        requestId: req._id.toString(),
+        userId: req.userId._id.toString(),
+        name: req.userId.fullName,
+        email: req.userId.email,
+        department: req.userId.department,
+        isOnline: actualOnlineStatus,
+        profilePicture: req.userId.profilePicture || "",
+        createdAt: req.createdAt,
+        type: "received"
+      };
+    });
 
     // Format sent requests
-    const sent = sentRequests.map(req => ({
-      id: req._id.toString(),
-      requestId: req._id.toString(),
-      userId: req.friendId._id.toString(),
-      name: req.friendId.fullName,
-      email: req.friendId.email,
-      department: req.friendId.department,
-      isOnline: req.friendId.isOnline || false,
-      profilePicture: req.friendId.profilePicture || "",
-      createdAt: req.createdAt,
-      type: "sent"
-    }));
+    const sent = sentRequests.map(req => {
+      // Verify online status against active socket connections
+      const hasActiveSockets = isUserOnline(req.friendId._id.toString());
+      const actualOnlineStatus = hasActiveSockets !== null ? hasActiveSockets : (req.friendId.isOnline || false);
+      
+      return {
+        id: req._id.toString(),
+        requestId: req._id.toString(),
+        userId: req.friendId._id.toString(),
+        name: req.friendId.fullName,
+        email: req.friendId.email,
+        department: req.friendId.department,
+        isOnline: actualOnlineStatus,
+        profilePicture: req.friendId.profilePicture || "",
+        createdAt: req.createdAt,
+        type: "sent"
+      };
+    });
 
     res.json({
       received: received,

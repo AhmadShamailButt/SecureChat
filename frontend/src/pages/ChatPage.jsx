@@ -260,15 +260,23 @@ export default function ChatPage() {
 
     // Rejoin conversation room if there's an active conversation
     if (activeId && !activeGroup) {
-      const sortedIds = [user?.id, activeId].filter(Boolean).sort();
-      const conversationRoomId = `msg_${sortedIds[0]}_${sortedIds[1]}`;
+      // Get actual conversation ID from messages if available
+      const actualConversationId = messages.length > 0 && messages[0].conversationId
+        ? messages[0].conversationId
+        : null;
+      
+      const conversationRoomId = actualConversationId || (() => {
+        const sortedIds = [user?.id, activeId].filter(Boolean).sort();
+        return `msg_${sortedIds[0]}_${sortedIds[1]}`;
+      })();
+      
       console.log('[SOCKET] Rejoining conversation room:', conversationRoomId);
       socket.emit('join', {
         conversationId: conversationRoomId,
         userId: user?.id
       });
     }
-  }, [socket, user, activeId, activeGroup]);
+  }, [socket, user, activeId, activeGroup, messages]);
 
   // Emit user online status when connected and join user-specific room
   useEffect(() => {
@@ -317,26 +325,42 @@ export default function ChatPage() {
     };
   }, [socket, dispatch]);
 
-  // Join room effect
+  // Join room effect - use actual conversation ID from messages when available
   useEffect(() => {
     if (!activeId || !isConnected || !socket || activeGroup) return;
     
-    // Logic from Code 2 for room consistency, compatible with Code 1 functionality
-    const sortedIds = [user?.id, activeId].filter(Boolean).sort();
-    const conversationRoomId = `msg_${sortedIds[0]}_${sortedIds[1]}`;
+    // Get actual conversation ID from messages if available
+    // All messages in a conversation share the same conversationId
+    const actualConversationId = messages.length > 0 && messages[0].conversationId
+      ? messages[0].conversationId
+      : null;
     
-    // Note: Code 1 used activeId directly, but for robust 1-to-1 chat, Code 2's room ID creation is safer.
-    // However, if your backend strictly requires just `activeId`, revert this to:
-    // conversationId: activeId
-    console.log('Joining room for conversation:', conversationRoomId);
+    // If we have the actual conversation ID from messages, use it
+    // Otherwise, fall back to the msg_ format for initial connection
+    // The backend emits read receipts to the conversation._id room, so we need to join that room
+    const conversationRoomId = actualConversationId || (() => {
+      const sortedIds = [user?.id, activeId].filter(Boolean).sort();
+      return `msg_${sortedIds[0]}_${sortedIds[1]}`;
+    })();
+    
+    console.log('Joining room for conversation:', conversationRoomId, 'activeId:', activeId, 'hasMessages:', messages.length > 0, 'actualConversationId:', actualConversationId);
     
     socket.emit('join', {
       conversationId: conversationRoomId,
       userId: user?.id
     });
 
+    // Also rejoin with actual conversation ID if messages loaded after initial join
+    if (actualConversationId && conversationRoomId !== actualConversationId) {
+      console.log('Rejoining with actual conversation ID:', actualConversationId);
+      socket.emit('join', {
+        conversationId: actualConversationId,
+        userId: user?.id
+      });
+    }
+
     return () => {};
-  }, [activeId, isConnected, socket, activeGroup, user]);
+  }, [activeId, isConnected, socket, activeGroup, user, messages]);
 
   // Fetch messages when active contact or group changes
   useEffect(() => {
@@ -351,8 +375,14 @@ export default function ChatPage() {
   // Mark messages as read
   useEffect(() => {
     if (!activeId || activeGroup || !messages.length) return;
+    
+    // Get actual conversation ID from messages (all messages in conversation share the same conversationId)
+    const actualConversationId = messages[0].conversationId;
+    if (!actualConversationId) return;
+    
+    // Filter unread messages that belong to this conversation
     const unreadMessages = messages.filter(
-      msg => msg.conversationId === activeId && 
+      msg => msg.conversationId === actualConversationId && 
              msg.senderId !== 'me' && 
              msg.senderId !== user?.id && 
              !msg.read &&
@@ -362,7 +392,7 @@ export default function ChatPage() {
     if (unreadMessages.length > 0) {
       const messageIds = unreadMessages.map(msg => msg.id);
       dispatch(markMessagesAsRead({ 
-        conversationId: activeId, 
+        conversationId: actualConversationId, 
         messageIds 
       }));
     }
@@ -414,8 +444,17 @@ export default function ChatPage() {
     };
     
     const handleMessagesRead = (readReceipt) => {
-      const isForCurrentConversation = readReceipt.conversationId === activeId || 
-                                       readReceipt.conversationId?.toString() === activeId?.toString();
+      // Get the actual conversation ID from the first message in current conversation
+      // Since all messages in a conversation share the same conversationId
+      const currentConversationId = messages.length > 0 && messages[0].conversationId 
+        ? messages[0].conversationId 
+        : null;
+      
+      // Compare read receipt conversation ID with actual conversation ID from messages
+      const isForCurrentConversation = currentConversationId && (
+        readReceipt.conversationId === currentConversationId || 
+        readReceipt.conversationId?.toString() === currentConversationId?.toString()
+      );
       
       if (isForCurrentConversation) {
         if (readReceipt.messageIds && readReceipt.messageIds.length > 0) {
@@ -431,8 +470,11 @@ export default function ChatPage() {
             }
           });
         } else {
+          // Mark all my messages in this conversation as read
           messages.forEach(msg => {
-            if (msg.conversationId === activeId && msg.senderId === 'me' && !msg.read) {
+            const msgConversationId = msg.conversationId?.toString();
+            const receiptConversationId = readReceipt.conversationId?.toString();
+            if (msgConversationId === receiptConversationId && msg.senderId === 'me' && !msg.read) {
               dispatch(markMessageAsRead({ messageId: msg.id }));
             }
           });

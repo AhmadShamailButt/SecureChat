@@ -5,6 +5,10 @@ const mongoose = require("mongoose");
 const { isConnected } = require("./database");
 let io;
 
+// Track active socket connections per user
+// Map<userId, Set<socketId>>
+const userSockets = new Map();
+
 exports.init = (server, corsOptions) => {
   io = socketIo(server, { 
     cors: corsOptions || { origin: "*", methods: ["GET", "POST"], credentials: true },
@@ -12,6 +16,19 @@ exports.init = (server, corsOptions) => {
     pingTimeout: 30000,
     pingInterval: 10000
   });
+
+  // On server start, mark all users as offline
+  // Socket connections will update status as users connect
+  (async () => {
+    try {
+      if (isConnected() || mongoose.connection.readyState === 1) {
+        await User.updateMany({}, { isOnline: false });
+        console.log("Server started: All users marked offline. Status will update as users connect.");
+      }
+    } catch (error) {
+      console.error("Error marking users offline on server start:", error);
+    }
+  })();
 
   io.on("connection", (socket) => {
     console.log("Client connected:", socket.id);
@@ -26,36 +43,54 @@ exports.init = (server, corsOptions) => {
       const userId = data.userId;
       if (!userId) return;
 
-      // Wait for MongoDB connection with retry
-      const updateUserStatus = async (retries = 5) => {
-        if (isConnected() || mongoose.connection.readyState === 1) {
-          try {
-            // Update user's online status
-            await User.findByIdAndUpdate(userId, {
-              isOnline: true,
-              lastSeen: new Date()
-            });
+      // Track this socket for the user
+      if (!userSockets.has(userId)) {
+        userSockets.set(userId, new Set());
+      }
+      const userSocketSet = userSockets.get(userId);
+      
+      // Check if this is the first socket connection for this user
+      const isFirstConnection = userSocketSet.size === 0;
+      
+      // Add this socket to the user's socket set
+      userSocketSet.add(socket.id);
+      socketUser = userId;
 
-            // Notify all other users that this user is now online
-            socket.broadcast.emit("userStatusChanged", {
-              userId: userId,
-              isOnline: true,
-              lastSeen: new Date()
-            });
+      // Only update database and notify if this is the first connection
+      if (isFirstConnection) {
+        // Wait for MongoDB connection with retry
+        const updateUserStatus = async (retries = 5) => {
+          if (isConnected() || mongoose.connection.readyState === 1) {
+            try {
+              // Update user's online status
+              await User.findByIdAndUpdate(userId, {
+                isOnline: true,
+                lastSeen: new Date()
+              });
 
-            console.log(`User ${userId} is now online`);
-          } catch (error) {
-            console.error("Error updating user online status:", error);
+              // Notify all other users that this user is now online
+              socket.broadcast.emit("userStatusChanged", {
+                userId: userId,
+                isOnline: true,
+                lastSeen: new Date()
+              });
+
+              console.log(`User ${userId} is now online (socket: ${socket.id}, total sockets: ${userSocketSet.size})`);
+            } catch (error) {
+              console.error("Error updating user online status:", error);
+            }
+          } else if (retries > 0) {
+            // Retry after 500ms if MongoDB is not connected yet
+            setTimeout(() => updateUserStatus(retries - 1), 500);
+          } else {
+            console.log("MongoDB not connected after retries, skipping user online status update");
           }
-        } else if (retries > 0) {
-          // Retry after 500ms if MongoDB is not connected yet
-          setTimeout(() => updateUserStatus(retries - 1), 500);
-        } else {
-          console.log("MongoDB not connected after retries, skipping user online status update");
-        }
-      };
+        };
 
-      updateUserStatus();
+        updateUserStatus();
+      } else {
+        console.log(`User ${userId} has additional socket connection (socket: ${socket.id}, total sockets: ${userSocketSet.size})`);
+      }
     });
 
     socket.on("join", (data) => {
@@ -78,32 +113,51 @@ exports.init = (server, corsOptions) => {
         // Join user-specific room for receiving read receipts and status updates
         socket.join(userId.toString());
         console.log(`Socket ${socket.id} joined user room: ${userId}`);
-
-        // Mark user as online when they join (with retry if MongoDB not ready)
-        const updateStatusOnJoin = async (retries = 5) => {
-          if (isConnected() || mongoose.connection.readyState === 1) {
-            try {
-              await User.findByIdAndUpdate(userId, {
-                isOnline: true,
-                lastSeen: new Date()
-              });
-
-              // Notify all other users
-              socket.broadcast.emit("userStatusChanged", {
-                userId: userId,
-                isOnline: true,
-                lastSeen: new Date()
-              });
-            } catch (err) {
-              console.error("Error updating user online status on join:", err);
+        
+        // Track this socket for the user
+        if (!userSockets.has(userId)) {
+          userSockets.set(userId, new Set());
+        }
+        const userSocketSet = userSockets.get(userId);
+        
+        // Check if this is the first socket connection for this user
+        const isFirstConnection = userSocketSet.size === 0;
+        
+        // Add this socket to the user's socket set
+        userSocketSet.add(socket.id);
+        
+        // Only update database and notify if this is the first connection
+        if (isFirstConnection) {
+          // Mark user as online when they join (with retry if MongoDB not ready)
+          const updateStatusOnJoin = async (retries = 5) => {
+            if (isConnected() || mongoose.connection.readyState === 1) {
+              try {
+                await User.findByIdAndUpdate(userId, {
+                  isOnline: true,
+                  lastSeen: new Date()
+                });
+                
+                // Notify all other users
+                socket.broadcast.emit("userStatusChanged", {
+                  userId: userId,
+                  isOnline: true,
+                  lastSeen: new Date()
+                });
+                
+                console.log(`User ${userId} is now online (socket: ${socket.id}, total sockets: ${userSocketSet.size})`);
+              } catch (err) {
+                console.error("Error updating user online status on join:", err);
+              }
+            } else if (retries > 0) {
+              // Retry after 500ms if MongoDB is not connected yet
+              setTimeout(() => updateStatusOnJoin(retries - 1), 500);
             }
-          } else if (retries > 0) {
-            // Retry after 500ms if MongoDB is not connected yet
-            setTimeout(() => updateStatusOnJoin(retries - 1), 500);
-          }
-        };
-
-        updateStatusOnJoin();
+          };
+          
+          updateStatusOnJoin();
+        } else {
+          console.log(`User ${userId} has additional socket connection (socket: ${socket.id}, total sockets: ${userSocketSet.size})`);
+        }
       }
 
       // Add to our tracking set
@@ -219,24 +273,40 @@ exports.init = (server, corsOptions) => {
     socket.on("disconnect", async () => {
       console.log("Client disconnected:", socket.id);
       
-      // Mark user as offline if we have their userId (only if MongoDB is connected)
-      if (socketUser && (isConnected() || mongoose.connection.readyState === 1)) {
-        try {
-          await User.findByIdAndUpdate(socketUser, {
-            isOnline: false,
-            lastSeen: new Date()
-          });
+      // Remove this socket from the user's socket set
+      if (socketUser) {
+        const userSocketSet = userSockets.get(socketUser);
+        if (userSocketSet) {
+          userSocketSet.delete(socket.id);
+          
+          // Check if this was the last socket connection for this user
+          const isLastConnection = userSocketSet.size === 0;
+          
+          // Only mark user offline if this was their last connection
+          if (isLastConnection && (isConnected() || mongoose.connection.readyState === 1)) {
+            try {
+              // Clean up the user's socket set
+              userSockets.delete(socketUser);
+              
+              await User.findByIdAndUpdate(socketUser, {
+                isOnline: false,
+                lastSeen: new Date()
+              });
 
-          // Notify all other users that this user is now offline
-          socket.broadcast.emit("userStatusChanged", {
-            userId: socketUser,
-            isOnline: false,
-            lastSeen: new Date()
-          });
+              // Notify all other users that this user is now offline
+              socket.broadcast.emit("userStatusChanged", {
+                userId: socketUser,
+                isOnline: false,
+                lastSeen: new Date()
+              });
 
-          console.log(`User ${socketUser} is now offline`);
-        } catch (error) {
-          console.error("Error updating user offline status:", error);
+              console.log(`User ${socketUser} is now offline (last socket disconnected)`);
+            } catch (error) {
+              console.error("Error updating user offline status:", error);
+            }
+          } else if (!isLastConnection) {
+            console.log(`User ${socketUser} still has ${userSocketSet.size} active socket(s)`);
+          }
         }
       }
       
@@ -670,5 +740,19 @@ exports.init = (server, corsOptions) => {
 exports.getIO = () => {
   if (!io) throw new Error("Socket.io not initialized");
   return io;
+};
+
+// Helper function to check if a user has active socket connections
+exports.isUserOnline = (userId) => {
+  if (!userId) return false;
+  const userSocketSet = userSockets.get(userId.toString());
+  return userSocketSet && userSocketSet.size > 0;
+};
+
+// Helper function to get the count of active sockets for a user
+exports.getUserSocketCount = (userId) => {
+  if (!userId) return 0;
+  const userSocketSet = userSockets.get(userId.toString());
+  return userSocketSet ? userSocketSet.size : 0;
 };
 
