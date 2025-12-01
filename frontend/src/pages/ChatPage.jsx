@@ -172,7 +172,6 @@ export default function ChatPage() {
   }, [user, dispatch]);
 
   // Decrypt messages when they're loaded
-  // STRICTLY PRESERVED FROM SOURCE 1
   useEffect(() => {
     const decryptMessagesAsync = async () => {
       if (!messages || messages.length === 0 || !isCryptoInitialized || !user || !activeContact) {
@@ -206,6 +205,16 @@ export default function ChatPage() {
             console.warn(`Cannot decrypt message ${msg.id}: missing user ID`);
             newDecrypted[msg.id] = '[Cannot decrypt: Old message format]';
             continue;
+          }
+
+          // DEBUG: Log data structure to catch "Object" errors
+          if (typeof msg.encryptedData !== 'string') {
+              console.error(`❌ Data format error for msg ${msg.id}:`, {
+                  type: typeof msg.encryptedData,
+                  value: msg.encryptedData
+              });
+              newDecrypted[msg.id] = '[Error: Corrupted Data]';
+              continue;
           }
 
           console.log(`🔓 Decrypting message ${msg.id}:`, {
@@ -418,9 +427,15 @@ export default function ChatPage() {
         // Add message to state
         dispatch(addMessage(msg));
         
-        // Decrypt if encrypted - STRICTLY PRESERVED FROM SOURCE 1
+        // Decrypt if encrypted
         if (msg.isEncrypted && isCryptoInitialized) {
           try {
+            // Validate data type before decrypting
+            if (typeof msg.encryptedData !== 'string') {
+                console.error("❌ Incoming message data corrupt:", typeof msg.encryptedData);
+                throw new Error("Invalid format");
+            }
+
             // For incoming messages, decrypt with sender's ID
             console.log(`🔓 Decrypting incoming message from:`, msg.senderId);
             
@@ -672,7 +687,7 @@ export default function ChatPage() {
     e.preventDefault();
     if (!messageText.trim() || !activeId || !isConnected || activeGroup) return;
     
-    // Check encryption capability - STRICTLY PRESERVED FROM SOURCE 1
+    // Check encryption capability
     const canEncrypt = isCryptoInitialized && activeContact && activeContact.userId;
     
     console.log('🔐 Encryption check:', { 
@@ -682,7 +697,7 @@ export default function ChatPage() {
       canEncrypt
     });
 
-    // Optimistic UI Update (From Code 2)
+    // Optimistic UI Update
     const tempId = `temp-${Date.now()}`;
     const newMessage = {
       id: tempId,
@@ -706,7 +721,7 @@ export default function ChatPage() {
     try {
       let messagePayload;
       
-      // Encryption Logic - STRICTLY PRESERVED FROM SOURCE 1
+      // Encryption Logic
       if (canEncrypt) {
         try {
           console.log('🔒 Encrypting message for user:', activeContact.userId);
@@ -734,7 +749,7 @@ export default function ChatPage() {
           };
         }
       } else {
-        console.log('⚠️  Crypto not ready, sending unencrypted');
+        console.log('⚠️ Crypto not ready, sending unencrypted');
         messagePayload = {
           conversationId: activeId,
           text: messageText.trim(),
@@ -743,7 +758,7 @@ export default function ChatPage() {
         };
       }
 
-      // Handle Replying To Logic (From Code 2)
+      // Handle Replying To Logic
       if (replyingTo) {
         messagePayload.text = `Replying to: ${replyingTo.text}\n${messagePayload.text}`;
       }
@@ -757,7 +772,7 @@ export default function ChatPage() {
       if (response.meta.requestStatus === "fulfilled" && response.payload?.id) {
         setProcessedMessageIds(prev => new Set(prev).add(response.payload.id));
         
-        // If encrypted, cache the decrypted version (Preserved from Source 1 logic)
+        // If encrypted, cache the decrypted version
         if (messagePayload.isEncrypted) {
           setDecryptedMessages(prev => ({
             ...prev,
@@ -789,7 +804,6 @@ export default function ChatPage() {
       setActiveId(contactId);
       dispatch(setSelectedContact(contact));
       dispatch(setSelectedGroup(null));
-      // Preserving Code 1's behavior to clear decrypted messages on switch
       setDecryptedMessages({});
       navigate(`/chat/${contactId}?view=messages`, { replace: true });
     }

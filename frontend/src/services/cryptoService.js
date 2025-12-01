@@ -21,12 +21,30 @@ class CryptoService {
   }
 
   /**
-   * Initialize crypto service and generate ECDH key pair
-   * This should be called when user logs in
+   * Initialize crypto service
+   * MODIFIED: Supports Persistence
+   * 1. Tries to load existing keys from LocalStorage using userId
+   * 2. If not found, generates new keys and saves them
    */
-  async initialize() {
+  async initialize(userId) {
     try {
-      // Generate ECDH key pair using P-256 curve
+      // 1. Validations
+      if (!userId) {
+        console.warn('⚠️ Crypto initialized without userId. Persistence will not work.');
+      }
+
+      // 2. Try to load existing keys first
+      if (userId) {
+        const loaded = await this.loadKeys(userId);
+        if (loaded) {
+          console.log('🔐 Crypto initialized: Restored existing keys from storage');
+          return true;
+        }
+      }
+
+      // 3. Generate NEW keys if we couldn't load old ones
+      console.log('⚠️ No existing keys found. Generating NEW identity...');
+      
       this.keyPair = await window.crypto.subtle.generateKey(
         {
           name: 'ECDH',
@@ -36,7 +54,12 @@ class CryptoService {
         ['deriveKey', 'deriveBits']
       );
 
-      console.log('🔐 Crypto initialized: Key pair generated');
+      // 4. Automatically save the new keys immediately
+      if (userId) {
+        await this.saveKeys(userId);
+      }
+
+      console.log('🔐 Crypto initialized: New Key pair generated and saved');
       return true;
     } catch (error) {
       console.error('Failed to initialize crypto:', error);
@@ -100,7 +123,7 @@ class CryptoService {
       
       // CRITICAL: Validate cached key matches current public key
       if (cached.publicKey === otherUserPublicKeyBase64) {
-        console.log(`✅ Using cached shared key for user: ${userId}`);
+        // console.log(`✅ Using cached shared key for user: ${userId}`); // Commented out to reduce spam
         return cached.key;
       } else {
         console.warn(`⚠️ Public key mismatch for user ${userId}! Clearing cache.`);
@@ -238,13 +261,9 @@ class CryptoService {
       } catch (base64Error) {
         // Provide more detailed error information
         console.error('❌ Base64 validation failed:', {
-          error: base64Error.message,
-          ciphertextLength: ciphertext?.length || 0,
-          ivLength: iv?.length || 0,
-          authTagLength: authTag?.length || 0,
-          ciphertextPreview: ciphertext?.substring(0, 50) || 'N/A',
-          ivPreview: iv?.substring(0, 20) || 'N/A',
-          authTagPreview: authTag?.substring(0, 20) || 'N/A'
+            error: base64Error.message,
+            ciphertextType: typeof ciphertext,
+            ciphertextPreview: typeof ciphertext === 'string' ? ciphertext.substring(0, 20) : 'NOT A STRING',
         });
         
         if (base64Error.message.includes('Invalid') || base64Error.message.includes('Missing')) {
@@ -256,7 +275,7 @@ class CryptoService {
       // Provide more specific error messages
       if (error.name === 'OperationError' || error.message.includes('decrypt')) {
         // This is likely a key mismatch or corrupted data
-        console.error(' Decryption failed (likely key mismatch or corrupted data):', error.name);
+        // console.error(' Decryption failed (likely key mismatch or corrupted data):', error.name);
       } else {
         console.error(' Decryption failed:', error.message || error);
       }
@@ -362,12 +381,11 @@ class CryptoService {
     try {
       // Check if we already have this group key cached
       if (this.groupKeys.has(groupId)) {
-        console.log(`🔑 Using cached group key for group: ${groupId}`);
+        // console.log(`🔑 Using cached group key for group: ${groupId}`);
         return this.groupKeys.get(groupId);
       }
 
-      console.log(`🔐 Decrypting group key for group ${groupId}...`);
-      console.log(`   Encrypted by user: ${senderId}`);
+      // console.log(`🔐 Decrypting group key for group ${groupId}...`);
 
       const { encryptedGroupKey, iv, authTag } = encryptedGroupKeyData;
 
@@ -389,7 +407,6 @@ class CryptoService {
       let sharedKey;
       try {
         // Clear any cached shared key for this user to force fresh derivation
-        // This helps if keys have changed
         if (this.sharedKeys.has(senderId)) {
           const cached = this.sharedKeys.get(senderId);
           if (cached.publicKey !== senderPublicKeyBase64) {
@@ -453,7 +470,6 @@ class CryptoService {
       }
 
       // Import the raw group key as an AES-GCM key
-      // IMPORTANT: Set extractable to true so we can export it later for re-encryption
       const groupKey = await window.crypto.subtle.importKey(
         'raw',
         groupKeyRaw,
@@ -471,9 +487,6 @@ class CryptoService {
       return groupKey;
     } catch (error) {
       console.error(`❌ Failed to decrypt group key for group ${groupId}:`, error);
-      console.error(`   Sender ID: ${senderId}`);
-      console.error(`   Error type: ${error.name}`);
-      console.error(`   Error message: ${error.message}`);
       throw new Error(`Failed to decrypt group key: ${error.message}`);
     }
   }
@@ -546,7 +559,12 @@ class CryptoService {
    */
   base64ToArrayBuffer(base64) {
     if (!base64 || typeof base64 !== 'string') {
-      throw new Error('Invalid base64 input: must be a non-empty string');
+        // Log the actual type for debugging
+        console.error('Invalid base64 input. Expected string, got:', typeof base64);
+        if (typeof base64 === 'object') {
+            console.error('Object value:', JSON.stringify(base64));
+        }
+        throw new Error(`Invalid base64 input: must be a non-empty string. Received ${typeof base64}`);
     }
     
     // Clean the base64 string: remove whitespace and handle URL-safe base64
@@ -574,7 +592,7 @@ class CryptoService {
       }
       return bytes.buffer;
     } catch (error) {
-      throw new Error(`Invalid base64 encoding: ${error.message}. Input length: ${base64.length}, cleaned length: ${cleaned.length}`);
+      throw new Error(`Invalid base64 encoding: ${error.message}.`);
     }
   }
 
@@ -610,19 +628,7 @@ class CryptoService {
       localStorage.setItem(`privateKey_${userId}`, privateKeyBase64);
       localStorage.setItem(`publicKey_${userId}`, publicKeyBase64);
       
-      // Verify they were saved
-      const savedPrivate = localStorage.getItem(`privateKey_${userId}`);
-      const savedPublic = localStorage.getItem(`publicKey_${userId}`);
-      
-      if (savedPrivate && savedPublic) {
-        console.log('✅ Keys saved to localStorage successfully');
-        console.log(`   - Private key length: ${savedPrivate.length} chars`);
-        console.log(`   - Public key length: ${savedPublic.length} chars`);
-        return true;
-      } else {
-        console.error('❌ Keys were not saved to localStorage!');
-        return false;
-      }
+      return true;
     } catch (error) {
       console.error('❌ Failed to save keys:', error);
       return false;
@@ -635,21 +641,14 @@ class CryptoService {
    */
   async loadKeys(userId) {
     try {
-      console.log(`🔍 Attempting to load keys for user: ${userId}`);
-      
       const privateKeyBase64 = localStorage.getItem(`privateKey_${userId}`);
       const publicKeyBase64 = localStorage.getItem(`publicKey_${userId}`);
 
       if (!privateKeyBase64 || !publicKeyBase64) {
-        console.log('📭 No saved keys found in localStorage');
-        console.log(`   - Checked for: privateKey_${userId}`);
-        console.log(`   - Checked for: publicKey_${userId}`);
         return false;
       }
 
       console.log('📦 Found saved keys in localStorage');
-      console.log(`   - Private key length: ${privateKeyBase64.length} chars`);
-      console.log(`   - Public key length: ${publicKeyBase64.length} chars`);
 
       // Import private key
       const privateKeyData = this.base64ToArrayBuffer(privateKeyBase64);
@@ -682,7 +681,6 @@ class CryptoService {
       return true;
     } catch (error) {
       console.error('❌ Failed to load keys:', error);
-      console.error('   Error details:', error.message);
       return false;
     }
   }
